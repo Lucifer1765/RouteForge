@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { haversineKm } from "../utils/geo.js";
 
-const ROUTE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const ROUTE_CACHE_TTL_MS = 5 * 60 * 1000;
 const ROUTE_CACHE_MAX_SIZE = 100;
 
 const routeCache = new Map();
@@ -249,7 +249,7 @@ async function fetchGraphHopperRoute(points) {
 
     return {
       distance_m: Math.round(path.distance),
-      duration_s: Math.max(1, Math.round(path.time / 1000)), // GraphHopper returns time in milliseconds
+      duration_s: Math.max(1, Math.round(path.time / 1000)),
       geometry: {
         type: "LineString",
         coordinates: path.points.coordinates,

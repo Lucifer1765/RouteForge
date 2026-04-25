@@ -1,8 +1,5 @@
 import * as turf from "@turf/turf";
 
-// ============================================================================
-// ENVIRONMENT CONFIGURATION
-// ============================================================================
 
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || null;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || null;
@@ -10,15 +7,7 @@ const HERE_API_KEY = process.env.HERE_API_KEY || null;
 const NASA_FIRMS_API_KEY = process.env.NASA_FIRMS_API_KEY || null;
 const USGS_API_ENABLED = process.env.USGS_API_ENABLED === "true";
 
-// ============================================================================
-// SEVERITY SCALE HELPERS
-// ============================================================================
 
-/**
- * Normalizes raw severity into a 1–10 scale.
- * @param {string|number} raw
- * @returns {number}
- */
 function normalizeSeverity(raw) {
   if (typeof raw === "number") {
     if (raw >= 1 && raw <= 10) return Math.round(raw);
@@ -32,11 +21,7 @@ function normalizeSeverity(raw) {
   return map[String(raw || "").toLowerCase().trim()] || 3;
 }
 
-/**
- * Converts weather condition strings into severity scores.
- * @param {string} condition
- * @returns {number}
- */
+
 function weatherSeverity(condition) {
   const c = String(condition || "").toLowerCase();
   if (c.includes("hurricane") || c.includes("tornado") || c.includes("blizzard")) return 10;
@@ -46,16 +31,7 @@ function weatherSeverity(condition) {
   return 2;
 }
 
-// ============================================================================
-// ROUTE SAMPLING
-// ============================================================================
 
-/**
- * Returns evenly spaced points along a route.
- * @param {number[][]} routeCoords - Array of [lon, lat] coordinates
- * @param {number} intervalKm - Spacing between sample points
- * @returns {{ lat: number, lon: number, distanceAlongRoute: number }[]}
- */
 export function sampleRoutePoints(routeCoords, intervalKm = 15) {
   if (!routeCoords || routeCoords.length < 2) return [];
 
@@ -74,16 +50,7 @@ export function sampleRoutePoints(routeCoords, intervalKm = 15) {
   return points;
 }
 
-// ============================================================================
-// WEATHER DATA COLLECTOR
-// ============================================================================
 
-/**
- * Fetches weather conditions along a route and converts extremes into incidents.
- * Uses OpenWeatherMap if API key is available; falls back to mock data.
- * @param {number[][]} routeCoords
- * @returns {Promise<Object[]>}
- */
 export async function fetchWeatherDisruptions(routeCoords) {
   const samples = sampleRoutePoints(routeCoords, 20);
   const incidents = [];
@@ -97,12 +64,12 @@ export async function fetchWeatherDisruptions(routeCoords) {
         const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
         if (res.ok) weatherData = await res.json();
       } catch {
-        // fall through to mock
+
       }
     }
 
     if (!weatherData) {
-      // Mock weather data with deterministic variation based on coordinates
+
       const hash = Math.abs((pt.lat * 100 + pt.lon) % 7);
       const conditions = ["clear", "light rain", "moderate rain", "heavy rain", "storm", "snow", "fog"];
       const condition = conditions[Math.floor(hash)];
@@ -141,16 +108,7 @@ export async function fetchWeatherDisruptions(routeCoords) {
   return incidents;
 }
 
-// ============================================================================
-// TRAFFIC INCIDENTS COLLECTOR
-// ============================================================================
 
-/**
- * Fetches traffic incidents near a route.
- * Structures code for Google Maps / HERE APIs with mock fallback.
- * @param {number[][]} routeCoords
- * @returns {Promise<Object[]>}
- */
 export async function fetchTrafficIncidents(routeCoords) {
   const incidents = [];
   const bbox = turf.bbox(turf.lineString(routeCoords));
@@ -158,7 +116,7 @@ export async function fetchTrafficIncidents(routeCoords) {
   const centerLon = center[0];
   const centerLat = center[1];
 
-  // Attempt Google Maps Traffic API
+
   if (GOOGLE_MAPS_API_KEY) {
     try {
       const url = `https://maps.googleapis.com/maps/api/traffic/json?key=${GOOGLE_MAPS_API_KEY}&bounds=${bbox[1]},${bbox[0]}|${bbox[3]},${bbox[2]}`;
@@ -178,11 +136,11 @@ export async function fetchTrafficIncidents(routeCoords) {
         }
       }
     } catch {
-      // fall through to mock
+
     }
   }
 
-  // Attempt HERE Traffic API
+
   if (HERE_API_KEY && incidents.length === 0) {
     try {
       const url = `https://traffic.ls.hereapi.com/traffic/6.2/incidents.json?apiKey=${HERE_API_KEY}&bbox=${bbox[1]},${bbox[0]};${bbox[3]},${bbox[2]}`;
@@ -203,11 +161,11 @@ export async function fetchTrafficIncidents(routeCoords) {
         }
       }
     } catch {
-      // fall through to mock
+
     }
   }
 
-  // Mock traffic incidents if no real data
+
   if (incidents.length === 0) {
     const mockIncidents = [
       { type: "ACCIDENT", description: "Multi-vehicle collision", offsetKm: 5, severity: 8 },
@@ -239,23 +197,14 @@ export async function fetchTrafficIncidents(routeCoords) {
   return incidents;
 }
 
-// ============================================================================
-// DISASTER EVENTS COLLECTOR
-// ============================================================================
 
-/**
- * Fetches natural disaster events near a route.
- * Simulates NASA FIRMS (fires) and USGS (earthquakes) with mock fallback.
- * @param {number[][]} routeCoords
- * @returns {Promise<Object[]>}
- */
 export async function fetchDisasterEvents(routeCoords) {
   const incidents = [];
   const line = turf.lineString(routeCoords);
   const bbox = turf.bbox(line);
   const bboxStr = `${bbox[1]},${bbox[0]},${bbox[3]},${bbox[2]}`;
 
-  // NASA FIRMS (fire data)
+
   if (NASA_FIRMS_API_KEY) {
     try {
       const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/VIIRS_NOAA20_NRT/${NASA_FIRMS_API_KEY}/${bboxStr}/1`;
@@ -285,11 +234,11 @@ export async function fetchDisasterEvents(routeCoords) {
         }
       }
     } catch {
-      // fall through
+
     }
   }
 
-  // USGS Earthquake API
+
   if (USGS_API_ENABLED) {
     try {
       const url = `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=${bbox[1]}&maxlatitude=${bbox[3]}&minlongitude=${bbox[0]}&maxlongitude=${bbox[2]}&starttime=${new Date(Date.now() - 86400000 * 7).toISOString().split("T")[0]}`;
@@ -314,11 +263,11 @@ export async function fetchDisasterEvents(routeCoords) {
         }
       }
     } catch {
-      // fall through
+
     }
   }
 
-  // Mock disaster data
+
   if (incidents.length === 0) {
     const totalLengthKm = turf.length(line, { units: "kilometers" });
     const mockDisasters = [
@@ -348,15 +297,7 @@ export async function fetchDisasterEvents(routeCoords) {
   return incidents;
 }
 
-// ============================================================================
-// CROWD-SOURCED REPORTS COLLECTOR (MOCK)
-// ============================================================================
 
-/**
- * Simulates crowd-sourced disruption reports.
- * @param {number[][]} routeCoords
- * @returns {Promise<Object[]>}
- */
 export async function fetchCrowdReports(routeCoords) {
   const line = turf.lineString(routeCoords);
   const totalLengthKm = turf.length(line, { units: "kilometers" });
@@ -389,21 +330,11 @@ export async function fetchCrowdReports(routeCoords) {
   return incidents;
 }
 
-// ============================================================================
-// DEDUPLICATION
-// ============================================================================
 
-/**
- * Removes duplicate incidents within a proximity threshold,
- * keeping the one with higher severity.
- * @param {Object[]} incidents
- * @param {number} thresholdKm - Proximity threshold (default 1 km)
- * @returns {Object[]}
- */
 export function deduplicateIncidents(incidents, thresholdKm = 1.0) {
   if (!incidents || incidents.length === 0) return [];
 
-  // Sort by severity descending so higher-severity incidents are kept
+
   const sorted = [...incidents].sort((a, b) => b.severity - a.severity);
   const kept = [];
 
@@ -428,16 +359,7 @@ export function deduplicateIncidents(incidents, thresholdKm = 1.0) {
   return kept;
 }
 
-// ============================================================================
-// UNIFIED AGGREGATOR
-// ============================================================================
 
-/**
- * Collects disruptions from all sources, merges, deduplicates,
- * and returns a standardized incident array.
- * @param {number[][]} routeCoords - Array of [lon, lat] coordinates
- * @returns {Promise<Object[]>}
- */
 export async function collectAllDisruptions(routeCoords) {
   if (!routeCoords || routeCoords.length < 2) {
     return [];
@@ -470,7 +392,7 @@ export async function collectAllDisruptions(routeCoords) {
 
   const deduplicated = deduplicateIncidents(all, 1.0);
 
-  // Sort by severity descending, then by source for consistency
+
   deduplicated.sort((a, b) => {
     if (b.severity !== a.severity) return b.severity - a.severity;
     return String(a.source).localeCompare(String(b.source));
@@ -479,9 +401,6 @@ export async function collectAllDisruptions(routeCoords) {
   return deduplicated;
 }
 
-// ============================================================================
-// DEFAULT EXPORT
-// ============================================================================
 
 export default {
   sampleRoutePoints,

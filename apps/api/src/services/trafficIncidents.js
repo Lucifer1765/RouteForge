@@ -1,9 +1,6 @@
 import * as turf from "@turf/turf";
 import { haversineKm } from "../utils/geo.js";
 
-// ============================================================================
-// 1. DISRUPTION CATEGORIES
-// ============================================================================
 
 export const DISRUPTION_CATEGORIES = {
   accident: "accident",
@@ -19,15 +16,7 @@ export const DISRUPTION_CATEGORIES = {
   other: "other",
 };
 
-// ============================================================================
-// 2. WEIGHTED KEYWORD CLASSIFICATION
-// ============================================================================
 
-/**
- * Weighted keyword matchers for each disruption category.
- * Each entry has keywords with a weight (0.0–1.0).
- * Higher weight = stronger signal.
- */
 const WEIGHTED_KEYWORDS = [
   {
     category: DISRUPTION_CATEGORIES.accident,
@@ -154,17 +143,9 @@ const WEIGHTED_KEYWORDS = [
   },
 ];
 
-// ============================================================================
-// 3. STRUCTURED TYPE MAPPING
-// ============================================================================
 
-/**
- * Maps API-specific structured type codes to canonical categories.
- * When a raw incident has a structured type field, this takes priority
- * over keyword matching.
- */
 const STRUCTURED_TYPE_MAPPING = {
-  // TomTom / Generic traffic APIs
+
   ACCIDENT: DISRUPTION_CATEGORIES.accident,
   TRAFFIC_ACCIDENT: DISRUPTION_CATEGORIES.accident,
   VEHICLE_ACCIDENT: DISRUPTION_CATEGORIES.accident,
@@ -204,15 +185,7 @@ const STRUCTURED_TYPE_MAPPING = {
   EVENT: DISRUPTION_CATEGORIES.special_event,
 };
 
-// ============================================================================
-// 4. CLASSIFICATION ENGINE
-// ============================================================================
 
-/**
- * Performs weighted keyword matching on incident text.
- * @param {string} text - The text to classify (type + description combined)
- * @returns {{ category: string, confidence: number }}
- */
 function classifyByKeywords(text) {
   const normalized = String(text || "").toLowerCase();
   let bestCategory = DISRUPTION_CATEGORIES.other;
@@ -236,7 +209,7 @@ function classifyByKeywords(text) {
     }
   }
 
-  // Confidence: ratio of best score to theoretical max (sum of all weights in best group)
+
   const bestGroup = WEIGHTED_KEYWORDS.find((g) => g.category === bestCategory);
   const maxPossible = bestGroup
     ? bestGroup.keywords.reduce((sum, k) => sum + k.weight, 0)
@@ -246,14 +219,9 @@ function classifyByKeywords(text) {
   return { category: bestCategory, confidence: Number(confidence.toFixed(3)) };
 }
 
-/**
- * Classifies an incident using structured type mapping (priority) or keyword matching.
- * @param {string|null} structuredType - API-provided type code
- * @param {string} text - Fallback text for keyword matching
- * @returns {{ category: string, confidence: number }}
- */
+
 function classifyIncident(structuredType, text) {
-  // Priority 1: structured type mapping
+
   if (structuredType) {
     const upper = String(structuredType).toUpperCase().trim();
     const mapped = STRUCTURED_TYPE_MAPPING[upper];
@@ -262,19 +230,11 @@ function classifyIncident(structuredType, text) {
     }
   }
 
-  // Priority 2: weighted keyword matching
+
   return classifyByKeywords(text);
 }
 
-// ============================================================================
-// 5. SEVERITY NORMALIZATION
-// ============================================================================
 
-/**
- * Normalizes any severity input to a 1–10 scale.
- * @param {string|number} raw - Raw severity value
- * @returns {number} Severity 1–10
- */
 function normalizeSeverity(raw) {
   if (typeof raw === "number") {
     if (raw >= 1 && raw <= 10) return Math.round(raw);
@@ -301,27 +261,7 @@ function normalizeSeverity(raw) {
   return map[str] || 3;
 }
 
-// ============================================================================
-// 6. INCIDENT NORMALIZATION
-// ============================================================================
 
-/**
- * Normalizes a raw incident into a canonical structure.
- * @param {Object} rawIncident - Raw data from any provider
- * @returns {{
- *   id: string,
- *   lat: number,
- *   lon: number,
- *   category: string,
- *   confidence: number,
- *   severity: number,
- *   source: string,
- *   description: string,
- *   type: string,
- *   reported_at: string|null,
- *   raw: Object
- * }}
- */
 export function normalizeIncident(rawIncident) {
   const lat = Number(rawIncident.latitude ?? rawIncident.location?.lat ?? rawIncident.lat ?? 0);
   const lon = Number(rawIncident.longitude ?? rawIncident.location?.lon ?? rawIncident.lon ?? 0);
@@ -329,7 +269,7 @@ export function normalizeIncident(rawIncident) {
   const rawType = rawIncident.type || rawIncident.event_type || rawIncident.eventType || "";
   const rawDescription = rawIncident.description || rawIncident.summary || rawIncident.event || "";
 
-  // Try structured type first, then fall back to keyword matching on combined text
+
   const { category, confidence } = classifyIncident(
     rawType,
     `${rawType} ${rawDescription}`
@@ -356,17 +296,7 @@ export function normalizeIncident(rawIncident) {
   };
 }
 
-// ============================================================================
-// 7. GEO-SPATIAL FILTERING WITH TURF
-// ============================================================================
 
-/**
- * Checks if a point is within thresholdKm of a route line using Turf.
- * @param {{ lat: number, lon: number }} point
- * @param {number[][]} routeCoords - Array of [lon, lat] coordinates
- * @param {number} thresholdKm - Distance threshold in kilometers
- * @returns {boolean}
- */
 export function isNearRoute(point, routeCoords, thresholdKm) {
   if (!routeCoords || routeCoords.length < 2) return false;
   if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return false;
@@ -374,18 +304,13 @@ export function isNearRoute(point, routeCoords, thresholdKm) {
   const pt = turf.point([point.lon, point.lat]);
   const line = turf.lineString(routeCoords);
 
-  // Turf pointToLineDistance returns kilometers
+
   const distance = turf.pointToLineDistance(pt, line, { units: "kilometers" });
 
   return distance < thresholdKm;
 }
 
-/**
- * Computes distance from a point to the nearest segment of a route.
- * @param {{ lat: number, lon: number }} point
- * @param {number[][]} routeCoords - Array of [lon, lat] coordinates
- * @returns {number} Distance in kilometers
- */
+
 export function distanceFromRoute(point, routeCoords) {
   if (!routeCoords || routeCoords.length < 2) return Infinity;
   if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return Infinity;
@@ -396,31 +321,7 @@ export function distanceFromRoute(point, routeCoords) {
   return turf.pointToLineDistance(pt, line, { units: "kilometers" });
 }
 
-// ============================================================================
-// 8. ROUTE DISRUPTION PIPELINE
-// ============================================================================
 
-/**
- * Main pipeline: processes raw incidents against a route and returns
- * classified, filtered, sorted disruptions with distance and risk.
- *
- * @param {number[][]} routeCoords - Route as array of [lon, lat] coordinates
- * @param {Object[]} incidents - Raw incidents from any source
- * @param {Object} options
- * @param {number} options.thresholdKm - Proximity threshold (default 50)
- * @param {boolean} options.includeRisk - Include risk score (default true)
- * @returns {{
- *   category: string,
- *   severity: number,
- *   distanceFromRoute: number,
- *   lat: number,
- *   lon: number,
- *   confidence: number,
- *   source: string,
- *   description: string,
- *   risk: number
- * }[]}
- */
 export function getRouteDisruptions(routeCoords, incidents, options = {}) {
   const { thresholdKm = 50, includeRisk = true } = options;
 
@@ -432,30 +333,30 @@ export function getRouteDisruptions(routeCoords, incidents, options = {}) {
     return [];
   }
 
-  // Step 1: Convert route to Turf LineString once
+
   const routeLine = turf.lineString(routeCoords);
 
-  // Step 2: Normalize + classify + filter + compute distance
+
   const results = [];
 
   for (const raw of incidents) {
     const incident = normalizeIncident(raw);
 
-    // Skip invalid locations
+
     if (!Number.isFinite(incident.lat) || !Number.isFinite(incident.lon)) {
       continue;
     }
 
-    // Compute distance using Turf
+
     const pt = turf.point([incident.lon, incident.lat]);
     const distanceKm = turf.pointToLineDistance(pt, routeLine, { units: "kilometers" });
 
-    // Filter by proximity
+
     if (distanceKm >= thresholdKm) {
       continue;
     }
 
-    // Risk scoring: severity * (1 / (distance + 1))
+
     const risk = includeRisk
       ? Number((incident.severity * (1 / (distanceKm + 1))).toFixed(2))
       : 0;
@@ -473,7 +374,7 @@ export function getRouteDisruptions(routeCoords, incidents, options = {}) {
     });
   }
 
-  // Step 3: Sort by severity descending, then distance ascending
+
   results.sort((a, b) => {
     if (b.severity !== a.severity) return b.severity - a.severity;
     return a.distanceFromRoute - b.distanceFromRoute;
@@ -482,27 +383,16 @@ export function getRouteDisruptions(routeCoords, incidents, options = {}) {
   return results;
 }
 
-// ============================================================================
-// 9. LEGACY COMPATIBILITY EXPORTS
-// ============================================================================
 
 export const ROUTE_DISRUPTION_TYPES = Object.values(DISRUPTION_CATEGORIES);
 
-/**
- * Legacy wrapper for existing codebase compatibility.
- * Fetches and processes live incidents for a route.
- * @param {{ geometry: { coordinates: number[][] } }} route
- * @returns {Promise<Object[]>}
- */
+
 export async function fetchLiveIncidentsForRoute(route) {
   if (!route?.geometry?.coordinates || route.geometry.coordinates.length === 0) {
     return [];
   }
 
-  // This function previously fetched from APIs. For the upgraded engine,
-  // the pipeline is decoupled: fetch raw data externally, then pass to
-  // getRouteDisruptions() for processing.
-  // Keeping the signature for backward compatibility.
+
   return [];
 }
 

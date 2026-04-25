@@ -54,14 +54,11 @@ test("POST /api/routes/disruption applies multiplier and returns reroute", async
   expect(disruption.status).toBe(200);
   expect(disruption.body.disruption.type).toBe("weather");
 
-  // With real routing engines, the detour distance is already captured.
-  // The multiplier only scales the ADDITIONAL delay caused by the disruption,
-  // not the entire route duration.
+
   expect(disruption.body.reroute.distance_m).toBeGreaterThan(baseline.route.distance_m);
   expect(disruption.body.reroute.duration_s).toBeGreaterThan(baseline.route.duration_s);
 
-  // Multiplier formula: typeMultiplier(weather=1.5) * countMultiplier(1 incident=1.15)
-  // = Math.max(1.05, 1.5 * 1.15).toFixed(2) = 1.73
+
   expect(disruption.body.reroute.multiplier_applied).toBeGreaterThanOrEqual(1.5);
   expect(disruption.body.reroute.multiplier_applied).toBeLessThanOrEqual(2.0);
 });

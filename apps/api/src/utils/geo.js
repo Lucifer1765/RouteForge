@@ -200,13 +200,13 @@ function extractDisplayName(payload) {
   }
 
   const addr = payload.address;
-  // Prefer city/town/village, then state, then country
+
   const place = addr.city || addr.town || addr.village || addr.hamlet || addr.suburb || addr.county || addr.state_district || null;
   const state = addr.state || addr.province || addr.region || null;
   const country = addr.country || null;
 
   if (place && country) {
-    // If place and country are the same (e.g., Singapore), just return place
+
     if (place === country) return place;
     return `${place}, ${country}`;
   }
@@ -223,9 +223,9 @@ function extractDisplayName(payload) {
     return country;
   }
 
-  // Fallback to display_name if structured address is empty
+
   if (payload.display_name) {
-    // display_name is often very long; take first 2-3 comma-separated parts
+
     const parts = payload.display_name.split(",").map((s) => s.trim());
     if (parts.length >= 3) {
       return `${parts[0]}, ${parts[parts.length - 1]}`;

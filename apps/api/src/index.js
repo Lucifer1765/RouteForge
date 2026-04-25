@@ -18,8 +18,8 @@ function parseOrigins() {
 
 async function checkRoutingHealth() {
   const osrmBase = (process.env.OSRM_BASE_URL || "https://router.project-osrm.org").replace(/\/$/, "");
-  // Health check: send a minimal routing request to verify OSRM is reachable.
-  // Any valid coordinates work here — this is just a connectivity probe.
+
+
   const testUrl = `${osrmBase}/route/v1/driving/13.388860,52.517037;13.397634,52.529407?overview=false`;
   try {
     const controller = new AbortController();
@@ -71,13 +71,13 @@ if (!isRunningInJest) {
   const port = Number(process.env.PORT || 8080);
 
   const server = app.listen(port, () => {
-    // eslint-disable-next-line no-console
+
     console.log(`API listening on http://localhost:${port}`);
   });
 
   server.on("error", (error) => {
     if (error.code === "EADDRINUSE") {
-      // eslint-disable-next-line no-console
+
       console.error(
         `Port ${port} is already in use. Stop the existing process or start the API on a different port with PORT=XXXX.`
       );
