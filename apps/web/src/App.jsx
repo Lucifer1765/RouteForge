@@ -311,8 +311,16 @@ export default function App() {
   return (
     <div className="app-shell" data-testid="app-shell">
       <header className="topbar" data-testid="topbar">
-        <div className="brand">RouteForge</div>
-        <div className="topbar-meta">OSRM · Driving · persisted · {scenarioId ? "scenario ready" : "no scenario"}</div>
+        <div className="brand">
+          <div className="brand-icon">RF</div>
+          RouteForge
+        </div>
+        <div className="topbar-meta">
+          <span className={`status-dot ${scenarioId ? "" : "offline"}`} />
+          {scenarioId ? "Scenario active" : "No scenario"}
+          <span style={{ color: "var(--border-default)" }}>|</span>
+          OSRM · Driving
+        </div>
       </header>
 
       <main className="dashboard-grid">
@@ -370,10 +378,11 @@ export default function App() {
 
       {errorMessage ? (
         <div className="error-toast" data-testid="error-toast">
+          <span className="lucide" data-lucide="alert-circle" style={{ width: 16, height: 16, flexShrink: 0 }} />
           <span>{errorMessage}</span>
           <button
             type="button"
-            className="btn btn-subtle"
+            className="btn btn-subtle btn-sm"
             onClick={() => setErrorMessage("")}
             data-testid="error-toast-dismiss-button"
           >

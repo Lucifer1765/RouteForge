@@ -16,14 +16,19 @@ export default function ChatBox({ messages, onSend, isLoading, isDisabled }) {
 
   return (
     <section className="chat-box" data-testid="chat-box">
-      <div className="section-title-row">
-        <span className="dot" />
-        <span className="section-title">Ask the Supply Chain AI</span>
+      <div className="section-header">
+        <div className="section-icon">
+          <span className="lucide" data-lucide="bot" style={{ width: 16, height: 16 }} />
+        </div>
+        <span className="section-title">Supply Chain AI</span>
       </div>
 
       <div className="chat-messages" data-testid="chat-messages">
         {messages.length === 0 ? (
-          <div className="empty-label">Ask about delays, risk, or dispatch timing.</div>
+          <div className="empty-label">
+            <span className="lucide" data-lucide="message-circle" style={{ width: 20, height: 20, marginBottom: "6px", display: "block", margin: "0 auto 6px", color: "var(--text-muted)" }} />
+            Ask about delays, risk, or dispatch timing.
+          </div>
         ) : (
           messages.map((message, index) => (
             <div
@@ -31,9 +36,21 @@ export default function ChatBox({ messages, onSend, isLoading, isDisabled }) {
               className={`chat-message ${message.role}`}
               data-testid={`chat-message-${message.role}-${index}`}
             >
-              <strong>{message.role === "user" ? "You" : "AI"}:</strong> {message.text}
+              <div className="message-role">
+                {message.role === "user" ? "You" : "AI Assistant"}
+              </div>
+              {message.text}
             </div>
           ))
+        )}
+        {isLoading && (
+          <div className="chat-message assistant" style={{ opacity: 0.7 }}>
+            <div className="message-role">AI Assistant</div>
+            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="spinner" style={{ width: 14, height: 14 }} />
+              Thinking...
+            </span>
+          </div>
         )}
       </div>
 
@@ -42,17 +59,17 @@ export default function ChatBox({ messages, onSend, isLoading, isDisabled }) {
           className="input"
           value={draft}
           onInput={(event) => setDraft(event.currentTarget.value)}
-          placeholder="Ask about this scenario..."
+          placeholder={isDisabled ? "Compute a route first..." : "Ask about this scenario..."}
           disabled={isDisabled}
           data-testid="chat-input"
         />
         <button
           type="submit"
           className="btn btn-primary"
-          disabled={isDisabled || isLoading}
+          disabled={isDisabled || isLoading || !draft.trim()}
           data-testid="chat-send-button"
         >
-          {isLoading ? "Sending..." : "Send"}
+          <span className="lucide" data-lucide="send" style={{ width: 16, height: 16 }} />
         </button>
       </form>
     </section>

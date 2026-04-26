@@ -1,12 +1,37 @@
 function formatDisruptionTitle(disruption) {
   const category = disruption.category?.replace(/_/g, " ") || disruption.type?.replace(/_/g, " ") || "Unknown";
-  const severity = disruption.severity != null ? String(disruption.severity).toUpperCase() : "UNKNOWN";
-  return `${category} · ${severity}`;
+  return category;
+}
+
+function getSeverityClass(severity) {
+  switch (String(severity).toLowerCase()) {
+    case "low":
+      return "severity-low";
+    case "medium":
+      return "severity-medium";
+    case "high":
+      return "severity-high";
+    default:
+      return "severity-high";
+  }
+}
+
+function getSeverityBadgeClass(severity) {
+  switch (String(severity).toLowerCase()) {
+    case "low":
+      return "severity-badge-low";
+    case "medium":
+      return "severity-badge-medium";
+    case "high":
+      return "severity-badge-high";
+    default:
+      return "severity-badge-high";
+  }
 }
 
 function formatScenarioLabel(scenario) {
   const disruption = scenario.active_disruption?.type
-    ? ` · ${scenario.active_disruption.type.replace(/_/g, " ")}`
+    ? ` \u00b7 ${scenario.active_disruption.type.replace(/_/g, " ")}`
     : "";
   return `${scenario.label}${disruption}`;
 }
@@ -137,11 +162,16 @@ export default function ScenarioForm({
                 <button
                   type="button"
                   key={incidentId}
-                  className={`disruption-card ${selectedLiveDisruptions && selectedLiveDisruptions.some(d => d.id === incidentId) ? "selected" : ""}`}
+                  className={`disruption-card ${getSeverityClass(incident.severity)} ${selectedLiveDisruptions && selectedLiveDisruptions.some(d => d.id === incidentId) ? "selected" : ""}`}
                   onClick={() => onSelectLiveDisruption({ ...incident, id: incidentId, location })}
                   data-testid={`select-live-disruption-${incidentId}`}
                 >
-                  <div className="disruption-title">{formatDisruptionTitle(incident)}</div>
+                  <div className="disruption-header">
+                    <div className="disruption-title">{formatDisruptionTitle(incident)}</div>
+                    <span className={`disruption-severity ${getSeverityBadgeClass(incident.severity)}`}>
+                      {incident.severity || "High"}
+                    </span>
+                  </div>
                   <div className="disruption-description">{incident.description}</div>
                   <div className="disruption-meta">
                     <span>{incident.provider}</span>
