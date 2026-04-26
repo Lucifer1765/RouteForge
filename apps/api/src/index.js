@@ -6,7 +6,7 @@ import reasoningRouter from "./routes/reasoning.js";
 import routesRouter from "./routes/routes.js";
 import scenariosRouter from "./routes/scenarios.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
-import { storageMode } from "./services/firestore.js";
+import { storageMode } from "./services/db/firestore.js";
 
 const require = createRequire(import.meta.url);
 
@@ -74,9 +74,13 @@ export function createApp() {
 }
 
 const isRunningInJest = process.env.JEST_WORKER_ID !== undefined;
+const isRunningInVercel = process.env.VERCEL === "1" || process.env.VERCEL === "true";
 
-if (!isRunningInJest) {
-  const app = createApp();
+const app = createApp();
+
+export default app;
+
+if (!isRunningInJest && !isRunningInVercel) {
   const port = Number(process.env.PORT || 8080);
 
   const server = app.listen(port, () => {
