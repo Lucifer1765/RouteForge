@@ -83,6 +83,6 @@ echo ""
 if [ "$PKG_MGR" = "yarn" ]; then
     yarn dev
 else
-    npx concurrently "npm run dev --workspace=@bal/api" "npm run dev --workspace=@bal/web"
+    npx concurrently "npm run dev --workspace=@routeforge/api" "npm run dev --workspace=@routeforge/web"
 fi
 

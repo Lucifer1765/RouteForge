@@ -7,12 +7,12 @@
   ],
   "scripts": {
     "setup": "./scripts/setup.sh",
-    "dev": "concurrently \"yarn workspace @bal/api dev\" \"yarn workspace @bal/web dev\"",
-    "build": "yarn workspace @bal/web build && yarn workspace @bal/api build",
-    "test": "yarn workspace @bal/api test && yarn workspace @bal/web test",
-    "test:api": "yarn workspace @bal/api test",
-    "test:web": "yarn workspace @bal/web test",
-    "test:e2e": "yarn workspace @bal/web test:e2e"
+    "dev": "concurrently \"yarn workspace @routeforge/api dev\" \"yarn workspace @routeforge/web dev\"",
+    "build": "yarn workspace @routeforge/web build && yarn workspace @routeforge/api build",
+    "test": "yarn workspace @routeforge/api test && yarn workspace @routeforge/web test",
+    "test:api": "yarn workspace @routeforge/api test",
+    "test:web": "yarn workspace @routeforge/web test",
+    "test:e2e": "yarn workspace @routeforge/web test:e2e"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

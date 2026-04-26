@@ -45,10 +45,10 @@ npm install -g yarn
 yarn install
 
 # Terminal 1 — API
-yarn workspace @bal/api dev
+yarn workspace @routeforge/api dev
 
 # Terminal 2 — Web
-yarn workspace @bal/web dev
+yarn workspace @routeforge/web dev
 
 # Open http://localhost:5173
 ```
@@ -57,7 +57,7 @@ yarn workspace @bal/web dev
 
 ```bash
 export NEWSAPI_KEY=your_key_here
-yarn workspace @bal/api dev
+yarn workspace @routeforge/api dev
 ```
 
 ## Configuration
