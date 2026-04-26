@@ -119,10 +119,15 @@ function normalizeRoute(rawRoute) {
 
 async function fetchOsrmRoute(points) {
   const coords = points.map((point) => `${point.lon},${point.lat}`).join(";");
+  const isAlternateRoute = points.length > 2;
+  const radiuses = isAlternateRoute
+    ? `&radiuses=${["unlimited", ...Array(points.length - 2).fill(5000), "unlimited"].join(";")}`
+    : "";
+  const continueStraight = isAlternateRoute ? "&continue_straight=false" : "";
   const urls = [
-    `${getOsrmBaseUrl()}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false`,
+    `${getOsrmBaseUrl()}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false${radiuses}${continueStraight}`,
     ...ALTERNATIVE_OSRM_URLS.map(baseUrl =>
-      `${baseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false`
+      `${baseUrl}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false${radiuses}${continueStraight}`
     )
   ];
 
@@ -202,9 +207,21 @@ async function fetchOpenRouteService(points) {
       throw new Error("OpenRouteService did not return a valid route payload");
     }
 
+    const segments = Array.isArray(feature.properties?.segments)
+      ? feature.properties.segments
+      : [];
+    const distanceM = segments.reduce(
+      (sum, segment) => sum + Number(segment?.distance || 0),
+      0
+    );
+    const durationS = segments.reduce(
+      (sum, segment) => sum + Number(segment?.duration || 0),
+      0
+    );
+
     return {
-      distance_m: Math.round(feature.properties?.segments?.[0]?.distance * 1000 || 0),
-      duration_s: Math.max(1, Math.round(feature.properties?.segments?.[0]?.duration || 0)),
+      distance_m: Math.round(distanceM),
+      duration_s: Math.max(1, Math.round(durationS)),
       geometry: {
         type: "LineString",
         coordinates: feature.geometry.coordinates,

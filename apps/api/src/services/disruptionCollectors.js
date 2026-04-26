@@ -2,6 +2,9 @@ import { v4 as uuidv4 } from "uuid";
 import * as turf from "@turf/turf";
 
 
+export const ROUTE_DISRUPTION_THRESHOLD_KM = Number(
+  process.env.ROUTE_DISRUPTION_THRESHOLD_KM || 8
+);
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY || null;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || null;
 const HERE_API_KEY = process.env.HERE_API_KEY || null;
@@ -35,13 +38,73 @@ function normalizeSeverityLabel(raw) {
   return "UNKNOWN";
 }
 
+function inferCategory(incident) {
+  const explicit = incident.category
+    ? String(incident.category).toLowerCase().replace(/\s+/g, "_")
+    : "";
+  const text = [
+    explicit,
+    incident.type,
+    incident.description,
+    incident.subType,
+    incident.source,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (explicit && explicit !== "unknown") {
+    if (explicit.includes("weather")) return "weather";
+    if (explicit.includes("natural") || explicit.includes("disaster")) return "natural_disaster";
+    if (explicit.includes("closure") || explicit.includes("closed")) return "road_closure";
+    if (explicit.includes("construction") || explicit.includes("roadwork")) return "construction";
+    if (explicit.includes("congestion") || explicit.includes("traffic_jam")) return "congestion";
+    if (explicit.includes("accident") || explicit.includes("collision")) return "accident";
+    if (explicit.includes("breakdown")) return "vehicle_breakdown";
+    if (explicit.includes("hazard")) return "hazard";
+    if (explicit.includes("police")) return "police_activity";
+    if (explicit.includes("event")) return "special_event";
+    return explicit;
+  }
+
+  if (/(storm|rain|snow|fog|weather|wind|hail|blizzard|hurricane|tornado)/.test(text)) return "weather";
+  if (/(flood|wildfire|landslide|earthquake|disaster|smoke|fire)/.test(text)) return "natural_disaster";
+  if (/(road closed|closure|closed|blocked|shutdown|no access)/.test(text)) return "road_closure";
+  if (/(construction|roadwork|road work|maintenance|repair|lane closure)/.test(text)) return "construction";
+  if (/(traffic jam|congestion|heavy traffic|slow traffic|queue|standstill)/.test(text)) return "congestion";
+  if (/(accident|collision|crash|wreck|pileup)/.test(text)) return "accident";
+  if (/(breakdown|disabled vehicle|broken down|mechanical failure)/.test(text)) return "vehicle_breakdown";
+  if (/(hazard|debris|pothole|obstruction|spill|fallen tree|sinkhole)/.test(text)) return "hazard";
+  if (/(police|checkpoint|investigation|law enforcement)/.test(text)) return "police_activity";
+  if (/(protest|parade|festival|marathon|event|demonstration)/.test(text)) return "special_event";
+
+  return "other";
+}
+
+export function getRouteImpactThresholdKm(incident) {
+  const category = inferCategory(incident);
+  const thresholds = {
+    accident: 3,
+    congestion: 3,
+    construction: 3,
+    hazard: 4,
+    road_closure: 3,
+    vehicle_breakdown: 2,
+    police_activity: 3,
+    special_event: 4,
+    weather: 12,
+    natural_disaster: 18,
+    other: 5,
+  };
+
+  return Math.min(ROUTE_DISRUPTION_THRESHOLD_KM, thresholds[category] || thresholds.other);
+}
+
 function normalizeIncidentForApi(incident) {
   const type = incident.type
     ? String(incident.type).toUpperCase().replace(/\s+/g, "_")
     : "UNKNOWN";
-  const category = incident.category
-    ? String(incident.category).toLowerCase().replace(/\s+/g, "_")
-    : type.toLowerCase();
+  const category = inferCategory(incident);
   const provider = String(incident.source || incident.provider || "unknown");
   const location = {
     lat: Number(incident.lat ?? incident.location?.lat),
@@ -56,7 +119,55 @@ function normalizeIncidentForApi(incident) {
     severity: normalizeSeverityLabel(incident.severity),
     location,
     provider,
+    distance_from_route_km: incident.distance_from_route_km,
+    route_impact_threshold_km: incident.route_impact_threshold_km,
   };
+}
+
+function distanceFromRouteKm(incident, routeLine) {
+  const lat = Number(incident.lat ?? incident.location?.lat);
+  const lon = Number(incident.lon ?? incident.location?.lon);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return Infinity;
+  }
+
+  return turf.pointToLineDistance(turf.point([lon, lat]), routeLine, {
+    units: "kilometers",
+  });
+}
+
+export function filterIncidentsNearRoute(
+  incidents,
+  routeCoords,
+  thresholdKm = ROUTE_DISRUPTION_THRESHOLD_KM
+) {
+  if (!Array.isArray(incidents) || incidents.length === 0) {
+    return [];
+  }
+
+  if (!routeCoords || routeCoords.length < 2) {
+    return [];
+  }
+
+  const routeLine = turf.lineString(routeCoords);
+
+  return incidents
+    .map((incident) => {
+      const distanceKm = distanceFromRouteKm(incident, routeLine);
+      return {
+        ...incident,
+        distance_from_route_km: Number.isFinite(distanceKm)
+          ? Number(distanceKm.toFixed(2))
+          : Infinity,
+        route_impact_threshold_km: getRouteImpactThresholdKm(incident),
+      };
+    })
+    .filter(
+      (incident) =>
+        incident.distance_from_route_km <=
+        Math.min(thresholdKm, incident.route_impact_threshold_km)
+    );
 }
 
 
@@ -428,11 +539,15 @@ export async function collectAllDisruptions(routeCoords) {
     all.push(...crowd.value);
   }
 
-  const deduplicated = deduplicateIncidents(all, 1.0);
+  const nearby = filterIncidentsNearRoute(all, routeCoords);
+  const deduplicated = deduplicateIncidents(nearby, 1.0);
 
 
   deduplicated.sort((a, b) => {
     if (b.severity !== a.severity) return b.severity - a.severity;
+    if (a.distance_from_route_km !== b.distance_from_route_km) {
+      return a.distance_from_route_km - b.distance_from_route_km;
+    }
     return String(a.source).localeCompare(String(b.source));
   });
 
@@ -446,6 +561,8 @@ export default {
   fetchTrafficIncidents,
   fetchDisasterEvents,
   fetchCrowdReports,
+  filterIncidentsNearRoute,
+  getRouteImpactThresholdKm,
   deduplicateIncidents,
   collectAllDisruptions,
 };
