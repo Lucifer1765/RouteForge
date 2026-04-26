@@ -1,19 +1,8 @@
+import { useEffect, useRef, useState } from "preact/hooks";
+
 function formatDisruptionTitle(disruption) {
   const category = disruption.category?.replace(/_/g, " ") || disruption.type?.replace(/_/g, " ") || "Unknown";
   return category;
-}
-
-function getSeverityClass(severity) {
-  switch (String(severity).toLowerCase()) {
-    case "low":
-      return "severity-low";
-    case "medium":
-      return "severity-medium";
-    case "high":
-      return "severity-high";
-    default:
-      return "severity-high";
-  }
 }
 
 function getSeverityBadgeClass(severity) {
@@ -36,11 +25,24 @@ function formatScenarioLabel(scenario) {
   return `${scenario.label}${disruption}`;
 }
 
+function buildDisruptionItem(incident) {
+  const location = incident.location || (incident.lat != null && incident.lon != null
+    ? { lat: incident.lat, lon: incident.lon }
+    : null);
+  const id = incident.id || `${incident.type || "incident"}-${location?.lat ?? "na"}-${location?.lon ?? "na"}`;
+
+  return {
+    ...incident,
+    id,
+    location,
+  };
+}
+
 export default function ScenarioForm({
-  sourceInput,
-  destinationInput,
-  onCoordinateChange,
+  routeSetup,
+  onLocationNameChange,
   onCompute,
+  canCompute,
   isComputing,
   onMapSelectionModeChange,
   mapSelectionMode,
@@ -53,6 +55,32 @@ export default function ScenarioForm({
   savedScenarios,
   onLoadScenario,
 }) {
+  const [isDisruptionMenuOpen, setIsDisruptionMenuOpen] = useState(false);
+  const disruptionMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isDisruptionMenuOpen) {
+      return undefined;
+    }
+
+    function handleDocumentClick(event) {
+      if (!disruptionMenuRef.current?.contains(event.target)) {
+        setIsDisruptionMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+    };
+  }, [isDisruptionMenuOpen]);
+
+  const sourceSelected = Boolean(routeSetup.sourcePoint);
+  const destinationSelected = Boolean(routeSetup.destinationPoint);
+  const routeName = `${routeSetup.sourceName.trim() || "Source"} → ${routeSetup.destinationName.trim() || "Destination"}`;
+  const disruptionOptions = liveDisruptions.map(buildDisruptionItem);
+  const selectedCount = selectedLiveDisruptions?.length || 0;
+
   return (
     <div className="scenario-form">
       <div className="section-title-row">
@@ -61,86 +89,75 @@ export default function ScenarioForm({
       </div>
 
       <div className="field-note">
-        Click the map to select source and destination points, or enter coordinates directly.
+        Select source and destination directly on the map. Coordinates are stored internally and not editable.
       </div>
 
       <div className="map-selection-controls">
         <button
           type="button"
-          className={`btn ${mapSelectionMode === "source" ? "active" : "btn-subtle"}`}
+          className={`btn btn-subtle ${mapSelectionMode === "source" ? "active" : ""}`}
           onClick={() => onMapSelectionModeChange("source")}
           data-testid="select-source-button"
         >
-          Select source on map
+          {sourceSelected ? "Source selected" : "Select source on map"}
         </button>
         <button
           type="button"
-          className={`btn ${mapSelectionMode === "destination" ? "active" : "btn-subtle"}`}
+          className={`btn btn-subtle ${mapSelectionMode === "destination" ? "active" : ""}`}
           onClick={() => onMapSelectionModeChange("destination")}
           data-testid="select-destination-button"
         >
-          Select destination on map
+          {destinationSelected ? "Destination selected" : "Select destination on map"}
         </button>
       </div>
 
       <div className="coord-grid">
-        <label className="field-label" htmlFor="source-lat-input">
-          Source lat
+        <label className="field-label" htmlFor="source-name-input">
+          Source name
         </label>
         <input
-          id="source-lat-input"
-          className="input mono"
-          value={sourceInput.lat}
-          onInput={(event) => onCoordinateChange("source", "lat", event.currentTarget.value)}
-          data-testid="source-lat-input"
+          id="source-name-input"
+          className="input"
+          value={routeSetup.sourceName}
+          onInput={(event) => onLocationNameChange("source", event.currentTarget.value)}
+          placeholder="Warehouse Alpha"
+          data-testid="source-name-input"
         />
 
-        <label className="field-label" htmlFor="source-lon-input">
-          Source lon
+        <label className="field-label" htmlFor="destination-name-input">
+          Destination name
         </label>
         <input
-          id="source-lon-input"
-          className="input mono"
-          value={sourceInput.lon}
-          onInput={(event) => onCoordinateChange("source", "lon", event.currentTarget.value)}
-          data-testid="source-lon-input"
+          id="destination-name-input"
+          className="input"
+          value={routeSetup.destinationName}
+          onInput={(event) => onLocationNameChange("destination", event.currentTarget.value)}
+          placeholder="Distribution Hub"
+          data-testid="destination-name-input"
         />
+      </div>
 
-        <label className="field-label" htmlFor="destination-lat-input">
-          Dest lat
-        </label>
-        <input
-          id="destination-lat-input"
-          className="input mono"
-          value={destinationInput.lat}
-          onInput={(event) =>
-            onCoordinateChange("destination", "lat", event.currentTarget.value)
-          }
-          data-testid="destination-lat-input"
-        />
-
-        <label className="field-label" htmlFor="destination-lon-input">
-          Dest lon
-        </label>
-        <input
-          id="destination-lon-input"
-          className="input mono"
-          value={destinationInput.lon}
-          onInput={(event) =>
-            onCoordinateChange("destination", "lon", event.currentTarget.value)
-          }
-          data-testid="destination-lon-input"
-        />
+      <div className="field-note" data-testid="route-name-preview">
+        {sourceSelected && destinationSelected
+          ? `Scenario label: ${routeName}`
+          : "Choose both map points to enable route computation."}
       </div>
 
       <button
         type="button"
         className="btn btn-primary"
         onClick={onCompute}
-        disabled={isComputing}
+        disabled={isComputing || !canCompute}
         data-testid="compute-optimized-route-button"
       >
-        {isComputing ? "Computing..." : "Compute optimized route"}
+        {isComputing ? (
+          <>
+            <span className="spinner" />
+            Computing optimized route
+          </>
+        ) : (
+          "Compute optimized route"
+        )}
       </button>
 
       <div className="section-title-row">
@@ -148,42 +165,79 @@ export default function ScenarioForm({
         <span className="section-title">Disruptions</span>
       </div>
 
-      {liveDisruptions.length > 0 ? (
+      {disruptionOptions.length > 0 ? (
         <div className="live-disruptions-selection">
           <div className="field-note">
-            Select one or more disruptions to consider for alternate route calculation.
+            Select one or more disruptions for alternate route computation.
           </div>
-          <div className="disruption-list">
-            {liveDisruptions.map((incident) => {
-              const location = incident.location || (incident.lat != null && incident.lon != null ? { lat: incident.lat, lon: incident.lon } : null);
-              const incidentId = incident.id || `${incident.type || "incident"}-${location?.lat ?? "na"}-${location?.lon ?? "na"}`;
+          <div className="disruption-multi-select" ref={disruptionMenuRef}>
+            <button
+              type="button"
+              className="btn btn-subtle disruption-select-trigger"
+              onClick={() => setIsDisruptionMenuOpen((current) => !current)}
+              data-testid="disruption-multiselect-trigger"
+            >
+              <span>
+                {selectedCount > 0
+                  ? `${selectedCount} disruption${selectedCount > 1 ? "s" : ""} selected`
+                  : "Select disruptions"}
+              </span>
+              <span className={`disruption-trigger-caret ${isDisruptionMenuOpen ? "open" : ""}`}>▾</span>
+            </button>
 
-              return (
-                <button
-                  type="button"
-                  key={incidentId}
-                  className={`disruption-card ${getSeverityClass(incident.severity)} ${selectedLiveDisruptions && selectedLiveDisruptions.some(d => d.id === incidentId) ? "selected" : ""}`}
-                  onClick={() => onSelectLiveDisruption({ ...incident, id: incidentId, location })}
-                  data-testid={`select-live-disruption-${incidentId}`}
-                >
-                  <div className="disruption-header">
-                    <div className="disruption-title">{formatDisruptionTitle(incident)}</div>
-                    <span className={`disruption-severity ${getSeverityBadgeClass(incident.severity)}`}>
-                      {incident.severity || "High"}
-                    </span>
-                  </div>
-                  <div className="disruption-description">{incident.description}</div>
-                  <div className="disruption-meta">
-                    <span>{incident.provider}</span>
-                    {location ? (
-                      <span>
-                        {location.lat.toFixed(4)}, {location.lon.toFixed(4)}
+            {isDisruptionMenuOpen ? (
+              <div className="disruption-dropdown-menu" data-testid="disruption-dropdown-menu">
+                {disruptionOptions.map((incident) => {
+                  const isSelected = Boolean(
+                    selectedLiveDisruptions &&
+                      selectedLiveDisruptions.some((item) => item.id === incident.id)
+                  );
+
+                  return (
+                    <button
+                      type="button"
+                      key={incident.id}
+                      className={`disruption-option ${isSelected ? "selected" : ""}`}
+                      onClick={() => onSelectLiveDisruption(incident)}
+                      data-testid={`select-live-disruption-${incident.id}`}
+                    >
+                      <span className={`disruption-check ${isSelected ? "checked" : ""}`}>{isSelected ? "✓" : ""}</span>
+                      <span className="disruption-option-content">
+                        <span className="disruption-title-row">
+                          <span className="disruption-title">{formatDisruptionTitle(incident)}</span>
+                          <span className={`disruption-severity ${getSeverityBadgeClass(incident.severity)}`}>
+                            {incident.severity || "High"}
+                          </span>
+                        </span>
+                        <span className="disruption-description">{incident.description}</span>
                       </span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="selected-disruption-chips" data-testid="selected-disruption-chips">
+            {selectedCount === 0 ? (
+              <div className="field-note">No disruptions selected</div>
+            ) : (
+              selectedLiveDisruptions.map((incident) => {
+                const enriched = buildDisruptionItem(incident);
+                return (
+                  <button
+                    type="button"
+                    key={enriched.id}
+                    className="disruption-chip"
+                    onClick={() => onSelectLiveDisruption(enriched)}
+                    data-testid={`selected-disruption-chip-${enriched.id}`}
+                  >
+                    <span>{formatDisruptionTitle(enriched)}</span>
+                    <span className="chip-remove">×</span>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       ) : (
@@ -199,7 +253,14 @@ export default function ScenarioForm({
         disabled={!canComputeAlternate || isComputingAlternate || !selectedLiveDisruptions || selectedLiveDisruptions.length === 0}
         data-testid="compute-alternate-route-button"
       >
-        {isComputingAlternate ? "Computing..." : `Compute alternate route (${selectedLiveDisruptions ? selectedLiveDisruptions.length : 0} disruption${selectedLiveDisruptions && selectedLiveDisruptions.length !== 1 ? 's' : ''})`}
+        {isComputingAlternate ? (
+          <>
+            <span className="spinner" />
+            Computing alternate route
+          </>
+        ) : (
+          `Compute alternate route (${selectedLiveDisruptions ? selectedLiveDisruptions.length : 0} disruption${selectedLiveDisruptions && selectedLiveDisruptions.length !== 1 ? "s" : ""})`
+        )}
       </button>
 
       <div className="section-title-row">

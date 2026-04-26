@@ -2,7 +2,24 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/pr
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("../src/components/Map.jsx", () => ({
-  default: () => <div data-testid="map-component">Map mock</div>,
+  default: ({ onMapClick, selectionMode }) => (
+    <div data-testid="map-component">
+      <button
+        type="button"
+        data-testid="mock-map-pick-point"
+        onClick={() => {
+          if (selectionMode === "source") {
+            onMapClick?.({ lat: 34.0522, lng: -118.2437 });
+          }
+          if (selectionMode === "destination") {
+            onMapClick?.({ lat: 41.8781, lng: -87.6298 });
+          }
+        }}
+      >
+        Pick map point
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("../src/lib/api.js", () => ({
@@ -22,6 +39,26 @@ import {
   fetchScenarios,
   sendScenarioChat,
 } from "../src/lib/api.js";
+
+async function pickMapRoutePoints() {
+  fireEvent.click(screen.getByTestId("select-source-button"));
+  fireEvent.click(screen.getByTestId("mock-map-pick-point"));
+
+  fireEvent.click(screen.getByTestId("select-destination-button"));
+  fireEvent.click(screen.getByTestId("mock-map-pick-point"));
+
+  await waitFor(() => {
+    expect(screen.getByTestId("compute-optimized-route-button")).not.toBeDisabled();
+  });
+}
+
+async function computeBaselineRoute() {
+  await pickMapRoutePoints();
+  fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
+  await waitFor(() => {
+    expect(computeOptimizedRoute).toHaveBeenCalledTimes(1);
+  });
+}
 
 const baselineResponse = {
   scenario_id: "scenario-1",
@@ -98,10 +135,13 @@ describe("App", () => {
   test("compute route enables alternate route calculation", async () => {
     render(<App />);
 
-    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "34.0522" } });
-    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
-    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
-    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
+    await pickMapRoutePoints();
+    fireEvent.input(screen.getByTestId("source-name-input"), {
+      target: { value: "Warehouse Alpha" },
+    });
+    fireEvent.input(screen.getByTestId("destination-name-input"), {
+      target: { value: "Distribution Hub" },
+    });
 
     fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
 
@@ -109,79 +149,62 @@ describe("App", () => {
       expect(computeOptimizedRoute).toHaveBeenCalledTimes(1);
     });
 
+    expect(computeOptimizedRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "Warehouse Alpha → Distribution Hub",
+      })
+    );
+
+    fireEvent.click(screen.getByTestId("disruption-multiselect-trigger"));
     fireEvent.click(screen.getByTestId("select-live-disruption-incident-1"));
 
     await waitFor(() => {
       expect(screen.getByTestId("compute-alternate-route-button")).not.toBeDisabled();
     });
 
+    expect(screen.getByTestId("selected-disruption-chips")).toHaveTextContent("weather severe");
     expect(screen.getByTestId("metric-distance-card")).toHaveTextContent("120.0 km");
   });
 
-  test("shows validation error when coordinates are missing", async () => {
+  test("compute route stays disabled until both map points are selected", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
+    expect(screen.getByTestId("compute-optimized-route-button")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("select-source-button"));
+    fireEvent.click(screen.getByTestId("mock-map-pick-point"));
+    expect(screen.getByTestId("compute-optimized-route-button")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("select-destination-button"));
+    fireEvent.click(screen.getByTestId("mock-map-pick-point"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("error-toast")).toHaveTextContent("Coordinates must be valid numbers");
+      expect(screen.getByTestId("compute-optimized-route-button")).not.toBeDisabled();
     });
-
-    expect(computeOptimizedRoute).not.toHaveBeenCalled();
   });
 
-  test("shows validation error when coordinates are out of range", async () => {
+  test("alternate route updates disruption metrics state", async () => {
     render(<App />);
 
-    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "134.0522" } });
-    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
-    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
-    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
+    await computeBaselineRoute();
 
-    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("error-toast")).toHaveTextContent(
-        "Coordinates are out of range (lat: -90 to 90, lon: -180 to 180)"
-      );
-    });
-
-    expect(computeOptimizedRoute).not.toHaveBeenCalled();
-  });
-
-  test("alternate route updates active disruption card", async () => {
-    render(<App />);
-
-    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "34.0522" } });
-    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
-    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
-    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
-
-    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
-    await waitFor(() => expect(computeOptimizedRoute).toHaveBeenCalledTimes(1));
-
+    fireEvent.click(screen.getByTestId("disruption-multiselect-trigger"));
     fireEvent.click(screen.getByTestId("select-live-disruption-incident-1"));
+    fireEvent.click(screen.getByTestId("disruption-multiselect-trigger"));
     fireEvent.click(screen.getByTestId("compute-alternate-route-button"));
 
     await waitFor(() => {
       expect(computeAlternateRoute).toHaveBeenCalledTimes(1);
     });
 
-    expect(screen.getByTestId("metric-active-disruption-card")).toHaveTextContent(
-      "weather severe"
-    );
+    expect(screen.getByTestId("metrics-panel")).toHaveTextContent("Disruption: weather severe");
+    expect(screen.getByTestId("metric-risk-card")).toHaveTextContent("66/100");
   });
 
   test("chat sends grounded message", async () => {
     render(<App />);
 
-    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "34.0522" } });
-    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
-    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
-    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
-
-    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
-    await waitFor(() => expect(computeOptimizedRoute).toHaveBeenCalledTimes(1));
+    await computeBaselineRoute();
 
     fireEvent.input(screen.getByTestId("chat-input"), {
       target: { value: "What is the risk?" },
@@ -196,13 +219,7 @@ describe("App", () => {
   test("refresh reasoning fetches latest explanation", async () => {
     render(<App />);
 
-    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "34.0522" } });
-    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
-    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
-    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
-
-    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
-    await waitFor(() => expect(computeOptimizedRoute).toHaveBeenCalledTimes(1));
+    await computeBaselineRoute();
 
     fireEvent.click(screen.getByTestId("refresh-reasoning-button"));
 

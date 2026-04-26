@@ -14,16 +14,12 @@ import {
   sendScenarioChat,
 } from "./lib/api.js";
 
-function toFixedInput(value) {
-  return Number(value).toFixed(4);
-}
-
 function parsePoint(point) {
-  const lat = Number.parseFloat(point.lat);
-  const lon = Number.parseFloat(point.lon);
+  const lat = Number.parseFloat(point?.lat);
+  const lon = Number.parseFloat(point?.lon);
 
   if (Number.isNaN(lat) || Number.isNaN(lon)) {
-    throw new Error("Coordinates must be valid numbers");
+    throw new Error("Select both source and destination on the map before computing.");
   }
 
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
@@ -45,291 +41,628 @@ function findEvent(events, kind) {
   return events.find((event) => event.kind === kind) || null;
 }
 
+function parseScenarioLabel(label) {
+  if (!label || typeof label !== "string") {
+    return {
+      sourceName: "",
+      destinationName: "",
+    };
+  }
+
+  const parts = label.split(/\s*(?:→|->)\s*/);
+  if (parts.length < 2) {
+    return {
+      sourceName: "",
+      destinationName: "",
+    };
+  }
+
+  return {
+    sourceName: parts[0].trim(),
+    destinationName: parts.slice(1).join(" → ").trim(),
+  };
+}
+
+function buildScenarioLabel(routeSetup) {
+  const sourceName = routeSetup.sourceName.trim() || "Source";
+  const destinationName = routeSetup.destinationName.trim() || "Destination";
+  return `${sourceName} → ${destinationName}`;
+}
+
+function clearRoutingForDraft(current, nextRouteSetup) {
+  return {
+    ...current,
+    routeSetup: nextRouteSetup,
+    scenario: {
+      ...current.scenario,
+      id: null,
+      label: buildScenarioLabel(nextRouteSetup),
+    },
+    routes: {
+      ...current.routes,
+      baselineRoute: null,
+      baselineMetrics: null,
+      rerouteRoute: null,
+      rerouteMetrics: null,
+      activeDisruption: null,
+      liveDisruptions: [],
+      selectedLiveDisruptions: [],
+    },
+    reasoning: {
+      ...current.reasoning,
+      text: "Compute a route to begin.",
+      chatMessages: [],
+    },
+    playback: {
+      ...current.playback,
+      step: 0,
+      isPlaying: false,
+    },
+  };
+}
+
 export default function App() {
-  const [sourceInput, setSourceInput] = useState({
-    lat: "",
-    lon: "",
+  const [appState, setAppState] = useState({
+    routeSetup: {
+      sourcePoint: null,
+      destinationPoint: null,
+      sourceName: "",
+      destinationName: "",
+      mapSelectionMode: null,
+    },
+    scenario: {
+      id: null,
+      label: "Source → Destination",
+      savedScenarios: [],
+    },
+    routes: {
+      baselineRoute: null,
+      baselineMetrics: null,
+      rerouteRoute: null,
+      rerouteMetrics: null,
+      activeDisruption: null,
+      liveDisruptions: [],
+      selectedLiveDisruptions: [],
+    },
+    reasoning: {
+      text: "Compute a route to begin.",
+      chatMessages: [],
+    },
+    playback: {
+      step: 0,
+      isPlaying: false,
+    },
+    controls: {
+      vehicleSpeed: 80,
+    },
+    loading: {
+      compute: false,
+      alternate: false,
+      reasoning: false,
+      chat: false,
+    },
+    ui: {
+      errorMessage: "",
+    },
   });
-  const [destinationInput, setDestinationInput] = useState({
-    lat: "",
-    lon: "",
-  });
-  const [routeLabel, setRouteLabel] = useState("Custom route");
-  const [mapSelectionMode, setMapSelectionMode] = useState(null);
-  const [scenarioId, setScenarioId] = useState(null);
-  const [baselineRoute, setBaselineRoute] = useState(null);
-  const [baselineMetrics, setBaselineMetrics] = useState(null);
-  const [rerouteRoute, setRerouteRoute] = useState(null);
-  const [rerouteMetrics, setRerouteMetrics] = useState(null);
-  const [activeDisruption, setActiveDisruption] = useState(null);
-  const [reasoning, setReasoning] = useState("Compute a route to begin.");
-  const [savedScenarios, setSavedScenarios] = useState([]);
-  const [playbackStep, setPlaybackStep] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [vehicleSpeed, setVehicleSpeed] = useState(80);
-  const [liveDisruptions, setLiveDisruptions] = useState([]);
-  const [selectedLiveDisruptions, setSelectedLiveDisruptions] = useState([]);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [isComputing, setIsComputing] = useState(false);
-  const [isComputingAlternate, setIsComputingAlternate] = useState(false);
-  const [isRefreshingReasoning, setIsRefreshingReasoning] = useState(false);
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
 
   async function refreshScenarios() {
     const payload = await fetchScenarios();
-    setSavedScenarios(payload.scenarios || []);
+    setAppState((current) => ({
+      ...current,
+      scenario: {
+        ...current.scenario,
+        savedScenarios: payload.scenarios || [],
+      },
+    }));
   }
 
   useEffect(() => {
     refreshScenarios().catch(() => {
-      setSavedScenarios([]);
+      setAppState((current) => ({
+        ...current,
+        scenario: {
+          ...current.scenario,
+          savedScenarios: [],
+        },
+      }));
     });
   }, []);
 
   useEffect(() => {
-    if (!isPlaying) {
+    if (!appState.playback.isPlaying) {
       return undefined;
     }
 
     const interval = setInterval(() => {
-      setPlaybackStep((current) => {
-        if (current >= 2) {
-          setIsPlaying(false);
-          return 2;
+      setAppState((current) => {
+        if (current.playback.step >= 2) {
+          return {
+            ...current,
+            playback: {
+              ...current.playback,
+              step: 2,
+              isPlaying: false,
+            },
+          };
         }
-        return current + 1;
+
+        return {
+          ...current,
+          playback: {
+            ...current.playback,
+            step: current.playback.step + 1,
+          },
+        };
       });
     }, 1100);
 
     return () => clearInterval(interval);
-  }, [isPlaying]);
-
-  function updateCoordinates(scope, key, value) {
-    if (scope === "source") {
-      setSourceInput((current) => ({ ...current, [key]: value }));
-      setRouteLabel("Custom route");
-      return;
-    }
-
-    setDestinationInput((current) => ({ ...current, [key]: value }));
-    setRouteLabel("Custom route");
-  }
+  }, [appState.playback.isPlaying]);
 
   function handleMapClick(point) {
-    if (!mapSelectionMode || !point) {
+    if (!appState.routeSetup.mapSelectionMode || !point) {
       return;
     }
 
-    const lat = point.lat.toFixed(6);
-    const lon = point.lng.toFixed(6);
+    const lat = Number(point.lat.toFixed(6));
+    const lon = Number(point.lng.toFixed(6));
 
-    if (mapSelectionMode === "source") {
-      setSourceInput({ lat, lon });
-    } else if (mapSelectionMode === "destination") {
-      setDestinationInput({ lat, lon });
-    }
+    setAppState((current) => {
+      const scope = current.routeSetup.mapSelectionMode;
+      if (!scope) {
+        return current;
+      }
 
-    setRouteLabel("Custom route");
-    setMapSelectionMode(null);
+      const pointKey = scope === "source" ? "sourcePoint" : "destinationPoint";
+      const nameKey = scope === "source" ? "sourceName" : "destinationName";
+      const fallbackName = scope === "source" ? "Source" : "Destination";
+
+      const nextRouteSetup = {
+        ...current.routeSetup,
+        [pointKey]: { lat, lon },
+        [nameKey]: current.routeSetup[nameKey] || fallbackName,
+        mapSelectionMode: null,
+      };
+
+      return clearRoutingForDraft(current, nextRouteSetup);
+    });
   }
 
   function handleMapSelectionMode(mode) {
-    setMapSelectionMode(mode);
+    setAppState((current) => ({
+      ...current,
+      routeSetup: {
+        ...current.routeSetup,
+        mapSelectionMode: current.routeSetup.mapSelectionMode === mode ? null : mode,
+      },
+    }));
+  }
+
+  function handleLocationNameChange(scope, value) {
+    setAppState((current) => {
+      const key = scope === "source" ? "sourceName" : "destinationName";
+      const nextRouteSetup = {
+        ...current.routeSetup,
+        [key]: value,
+      };
+      return clearRoutingForDraft(current, nextRouteSetup);
+    });
   }
 
   async function handleComputeRoute() {
     try {
-      setErrorMessage("");
-      setIsComputing(true);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          compute: true,
+        },
+        ui: {
+          ...current.ui,
+          errorMessage: "",
+        },
+      }));
 
-      const source = parsePoint(sourceInput);
-      const destination = parsePoint(destinationInput);
+      const source = parsePoint(appState.routeSetup.sourcePoint);
+      const destination = parsePoint(appState.routeSetup.destinationPoint);
+      const requestedLabel = buildScenarioLabel(appState.routeSetup);
       const payload = await computeOptimizedRoute({
         source,
         destination,
-        label: routeLabel,
+        label: requestedLabel,
       });
 
-      setScenarioId(payload.scenario_id);
-      setBaselineRoute(payload.route);
-      setBaselineMetrics({
-        distance_m: payload.route.distance_m,
-        duration_s: payload.route.duration_s,
-        risk_score: payload.route.risk_score ?? payload.risk_score,
-        cost_usd: payload.route.cost_usd ?? payload.cost_usd,
-      });
-      setRerouteRoute(null);
-      setRerouteMetrics(null);
-      setActiveDisruption(null);
-      setLiveDisruptions(payload.live_disruptions || []);
-      setSelectedLiveDisruptions([]);
-      setReasoning(payload.reasoning || "Route computed.");
-      setChatMessages([]);
-      setPlaybackStep(0);
-      setIsPlaying(false);
+      const parsedNames = parseScenarioLabel(payload.label || requestedLabel);
+
+      setAppState((current) => ({
+        ...current,
+        routeSetup: {
+          ...current.routeSetup,
+          sourceName: parsedNames.sourceName || current.routeSetup.sourceName || "Source",
+          destinationName:
+            parsedNames.destinationName ||
+            current.routeSetup.destinationName ||
+            "Destination",
+          mapSelectionMode: null,
+        },
+        scenario: {
+          ...current.scenario,
+          id: payload.scenario_id,
+          label: payload.label || requestedLabel,
+        },
+        routes: {
+          ...current.routes,
+          baselineRoute: payload.route,
+          baselineMetrics: {
+            distance_m: payload.route.distance_m,
+            duration_s: payload.route.duration_s,
+            risk_score: payload.route.risk_score ?? payload.risk_score,
+            cost_usd: payload.route.cost_usd ?? payload.cost_usd,
+          },
+          rerouteRoute: null,
+          rerouteMetrics: null,
+          activeDisruption: null,
+          liveDisruptions: payload.live_disruptions || [],
+          selectedLiveDisruptions: [],
+        },
+        reasoning: {
+          ...current.reasoning,
+          text: payload.reasoning || "Route computed.",
+          chatMessages: [],
+        },
+        playback: {
+          ...current.playback,
+          step: 0,
+          isPlaying: false,
+        },
+      }));
+
       await refreshScenarios();
     } catch (error) {
-      setErrorMessage(error.message || "Failed to compute route");
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: error.message || "Failed to compute route",
+        },
+      }));
     } finally {
-      setIsComputing(false);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          compute: false,
+        },
+      }));
     }
   }
 
   async function handleComputeAlternateRoute() {
-    if (!scenarioId || selectedLiveDisruptions.length === 0) {
+    if (!appState.scenario.id || appState.routes.selectedLiveDisruptions.length === 0) {
       return;
     }
 
     try {
-      setErrorMessage("");
-      setIsComputingAlternate(true);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          alternate: true,
+        },
+        ui: {
+          ...current.ui,
+          errorMessage: "",
+        },
+      }));
+
       const payload = await computeAlternateRoute({
-        scenario_id: scenarioId,
-        incidents: selectedLiveDisruptions,
+        scenario_id: appState.scenario.id,
+        incidents: appState.routes.selectedLiveDisruptions,
       });
 
-      setRerouteRoute(payload.reroute);
-      setRerouteMetrics({
-        distance_m: payload.reroute.distance_m,
-        duration_s: payload.reroute.duration_s,
-        risk_score: payload.reroute.risk_score,
-        cost_usd: payload.reroute.cost_usd,
-      });
-      setActiveDisruption(payload.disruption);
-      setReasoning(payload.reasoning || "Alternate route computed.");
-      setPlaybackStep(2);
-      setIsPlaying(false);
+      setAppState((current) => ({
+        ...current,
+        routes: {
+          ...current.routes,
+          rerouteRoute: payload.reroute,
+          rerouteMetrics: {
+            distance_m: payload.reroute.distance_m,
+            duration_s: payload.reroute.duration_s,
+            risk_score: payload.reroute.risk_score,
+            cost_usd: payload.reroute.cost_usd,
+          },
+          activeDisruption: payload.disruption,
+        },
+        reasoning: {
+          ...current.reasoning,
+          text: payload.reasoning || "Alternate route computed.",
+        },
+        playback: {
+          ...current.playback,
+          step: 2,
+          isPlaying: false,
+        },
+      }));
+
       await refreshScenarios();
     } catch (error) {
-      setErrorMessage(error.message || "Failed to compute alternate route");
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: error.message || "Failed to compute alternate route",
+        },
+      }));
     } finally {
-      setIsComputingAlternate(false);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          alternate: false,
+        },
+      }));
     }
   }
 
   function handleSelectLiveDisruption(disruption) {
-    setSelectedLiveDisruptions((current) => {
-      const isSelected = current.some(d => d.id === disruption.id);
-      if (isSelected) {
-        return current.filter(d => d.id !== disruption.id);
-      } else {
-        return [...current, disruption];
-      }
+    setAppState((current) => {
+      const isSelected = current.routes.selectedLiveDisruptions.some(
+        (item) => item.id === disruption.id
+      );
+
+      return {
+        ...current,
+        routes: {
+          ...current.routes,
+          selectedLiveDisruptions: isSelected
+            ? current.routes.selectedLiveDisruptions.filter((item) => item.id !== disruption.id)
+            : [...current.routes.selectedLiveDisruptions, disruption],
+        },
+      };
     });
   }
 
   async function handleLoadScenario(nextScenarioId) {
     try {
-      setErrorMessage("");
-      const scenario = await fetchScenario(nextScenarioId);
-      setScenarioId(scenario.scenario_id);
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: "",
+        },
+      }));
 
-      setSourceInput({
-        lat: toFixedInput(scenario.source.lat),
-        lon: toFixedInput(scenario.source.lon),
-      });
-      setDestinationInput({
-        lat: toFixedInput(scenario.destination.lat),
-        lon: toFixedInput(scenario.destination.lon),
-      });
+      const scenario = await fetchScenario(nextScenarioId);
+
+      const parsedNames = parseScenarioLabel(scenario.label);
 
       const initial = findEvent(scenario.events || [], "initial_route");
       const reroute = findEvent(scenario.events || [], "reroute");
 
-      setBaselineRoute(initial?.route || null);
-      setBaselineMetrics(
-        initial
-          ? {
-              distance_m: initial.route.distance_m,
-              duration_s: initial.route.duration_s,
-              risk_score: initial.risk_score,
-              cost_usd: initial.cost_usd,
-            }
-          : null
-      );
-
-      setRerouteRoute(reroute?.route || null);
-      setRerouteMetrics(
-        reroute
-          ? {
-              distance_m: reroute.route.distance_m,
-              duration_s: reroute.route.duration_s,
-              risk_score: reroute.risk_score,
-              cost_usd: reroute.cost_usd,
-            }
-          : null
-      );
-
-      setActiveDisruption(scenario.active_disruption || null);
-      setLiveDisruptions([]);
-      setRouteLabel(scenario.label || "Custom route");
-      setMapSelectionMode(null);
-      setReasoning(scenario.reasoning || "Loaded scenario");
-      setPlaybackStep(reroute ? 2 : 0);
-      setIsPlaying(false);
-      setChatMessages([]);
+      setAppState((current) => ({
+        ...current,
+        routeSetup: {
+          ...current.routeSetup,
+          sourcePoint: {
+            lat: Number(scenario.source.lat),
+            lon: Number(scenario.source.lon),
+          },
+          destinationPoint: {
+            lat: Number(scenario.destination.lat),
+            lon: Number(scenario.destination.lon),
+          },
+          sourceName: parsedNames.sourceName || current.routeSetup.sourceName || "Source",
+          destinationName:
+            parsedNames.destinationName ||
+            current.routeSetup.destinationName ||
+            "Destination",
+          mapSelectionMode: null,
+        },
+        scenario: {
+          ...current.scenario,
+          id: scenario.scenario_id,
+          label: scenario.label || buildScenarioLabel(current.routeSetup),
+        },
+        routes: {
+          ...current.routes,
+          baselineRoute: initial?.route || null,
+          baselineMetrics: initial
+            ? {
+                distance_m: initial.route.distance_m,
+                duration_s: initial.route.duration_s,
+                risk_score: initial.risk_score,
+                cost_usd: initial.cost_usd,
+              }
+            : null,
+          rerouteRoute: reroute?.route || null,
+          rerouteMetrics: reroute
+            ? {
+                distance_m: reroute.route.distance_m,
+                duration_s: reroute.route.duration_s,
+                risk_score: reroute.risk_score,
+                cost_usd: reroute.cost_usd,
+              }
+            : null,
+          activeDisruption: scenario.active_disruption || null,
+          liveDisruptions: [],
+          selectedLiveDisruptions: [],
+        },
+        reasoning: {
+          ...current.reasoning,
+          text: scenario.reasoning || "Loaded scenario",
+          chatMessages: [],
+        },
+        playback: {
+          ...current.playback,
+          step: reroute ? 2 : 0,
+          isPlaying: false,
+        },
+      }));
     } catch (error) {
-      setErrorMessage(error.message || "Failed to load scenario");
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: error.message || "Failed to load scenario",
+        },
+      }));
     }
   }
 
   async function handleRefreshReasoning() {
-    if (!scenarioId || isRefreshingReasoning) {
+    if (!appState.scenario.id || appState.loading.reasoning) {
       return;
     }
 
     try {
-      setErrorMessage("");
-      setIsRefreshingReasoning(true);
-      const payload = await fetchReasoning(scenarioId);
-      setReasoning(payload.reasoning || "Reasoning refreshed.");
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          reasoning: true,
+        },
+        ui: {
+          ...current.ui,
+          errorMessage: "",
+        },
+      }));
+
+      const payload = await fetchReasoning(appState.scenario.id);
+
+      setAppState((current) => ({
+        ...current,
+        reasoning: {
+          ...current.reasoning,
+          text: payload.reasoning || "Reasoning refreshed.",
+        },
+      }));
     } catch (error) {
-      setErrorMessage(error.message || "Failed to refresh reasoning");
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: error.message || "Failed to refresh reasoning",
+        },
+      }));
     } finally {
-      setIsRefreshingReasoning(false);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          reasoning: false,
+        },
+      }));
     }
   }
 
   async function handleSendChat(message) {
-    if (!scenarioId) {
-      setErrorMessage("Compute a route before using chat");
+    if (!appState.scenario.id) {
+      setAppState((current) => ({
+        ...current,
+        ui: {
+          ...current.ui,
+          errorMessage: "Compute a route before using chat",
+        },
+      }));
       return;
     }
 
-    setChatMessages((current) => [...current, { role: "user", text: message }]);
-    setIsChatLoading(true);
+    setAppState((current) => ({
+      ...current,
+      reasoning: {
+        ...current.reasoning,
+        chatMessages: [...current.reasoning.chatMessages, { role: "user", text: message }],
+      },
+      loading: {
+        ...current.loading,
+        chat: true,
+      },
+    }));
 
     try {
-      const payload = await sendScenarioChat(scenarioId, message);
-      setChatMessages((current) => [
+      const payload = await sendScenarioChat(appState.scenario.id, message);
+
+      setAppState((current) => ({
         ...current,
-        { role: "assistant", text: payload.reply },
-      ]);
+        reasoning: {
+          ...current.reasoning,
+          chatMessages: [...current.reasoning.chatMessages, { role: "assistant", text: payload.reply }],
+        },
+      }));
     } catch (error) {
-      setChatMessages((current) => [
+      setAppState((current) => ({
         ...current,
-        { role: "assistant", text: error.message || "Chat unavailable right now." },
-      ]);
+        reasoning: {
+          ...current.reasoning,
+          chatMessages: [
+            ...current.reasoning.chatMessages,
+            { role: "assistant", text: error.message || "Chat unavailable right now." },
+          ],
+        },
+      }));
     } finally {
-      setIsChatLoading(false);
+      setAppState((current) => ({
+        ...current,
+        loading: {
+          ...current.loading,
+          chat: false,
+        },
+      }));
     }
   }
 
   function handleTogglePlay() {
-    if (isPlaying) {
-      setIsPlaying(false);
-      return;
-    }
+    setAppState((current) => {
+      if (current.playback.isPlaying) {
+        return {
+          ...current,
+          playback: {
+            ...current.playback,
+            isPlaying: false,
+          },
+        };
+      }
 
-    setPlaybackStep((current) => (current === 2 ? 0 : current));
-    setIsPlaying(true);
+      return {
+        ...current,
+        playback: {
+          ...current.playback,
+          step: current.playback.step === 2 ? 0 : current.playback.step,
+          isPlaying: true,
+        },
+      };
+    });
   }
 
   function handleStepChange(step) {
-    setIsPlaying(false);
-    setPlaybackStep(step);
+    setAppState((current) => ({
+      ...current,
+      playback: {
+        ...current.playback,
+        step,
+        isPlaying: false,
+      },
+    }));
   }
+
+  const canComputeRoute = Boolean(
+    safeParsePoint(appState.routeSetup.sourcePoint) &&
+      safeParsePoint(appState.routeSetup.destinationPoint)
+  );
+  const laneLabel = appState.scenario.label || buildScenarioLabel(appState.routeSetup);
+  const estimatedDelayMinutes =
+    Number.isFinite(appState.routes.rerouteMetrics?.duration_s) &&
+    Number.isFinite(appState.routes.baselineMetrics?.duration_s)
+      ? Math.max(
+          0,
+          Math.round(
+            (appState.routes.rerouteMetrics.duration_s -
+              appState.routes.baselineMetrics.duration_s) /
+              60
+          )
+        )
+      : 0;
 
   return (
     <div className="app-shell" data-testid="app-shell">
@@ -339,8 +672,8 @@ export default function App() {
           RouteForge
         </div>
         <div className="topbar-meta">
-          <span className={`status-dot ${scenarioId ? "" : "offline"}`} />
-          {scenarioId ? "Scenario active" : "No scenario"}
+          <span className={`status-dot ${appState.scenario.id ? "" : "offline"}`} />
+          {appState.scenario.id ? "Scenario active" : "No scenario"}
           <span style={{ color: "var(--border-default)" }}>|</span>
           OSRM · Driving
         </div>
@@ -349,69 +682,94 @@ export default function App() {
       <main className="dashboard-grid">
         <section className="panel left-panel">
           <ScenarioForm
-            sourceInput={sourceInput}
-            destinationInput={destinationInput}
-            onCoordinateChange={updateCoordinates}
+            routeSetup={appState.routeSetup}
+            onLocationNameChange={handleLocationNameChange}
             onCompute={handleComputeRoute}
-            isComputing={isComputing}
+            canCompute={canComputeRoute}
+            isComputing={appState.loading.compute}
             onMapSelectionModeChange={handleMapSelectionMode}
-            mapSelectionMode={mapSelectionMode}
+            mapSelectionMode={appState.routeSetup.mapSelectionMode}
             onComputeAlternateRoute={handleComputeAlternateRoute}
-            isComputingAlternate={isComputingAlternate}
-            canComputeAlternate={!!scenarioId}
-            liveDisruptions={liveDisruptions}
-            selectedLiveDisruptions={selectedLiveDisruptions}
+            isComputingAlternate={appState.loading.alternate}
+            canComputeAlternate={!!appState.scenario.id}
+            liveDisruptions={appState.routes.liveDisruptions}
+            selectedLiveDisruptions={appState.routes.selectedLiveDisruptions}
             onSelectLiveDisruption={handleSelectLiveDisruption}
-            savedScenarios={savedScenarios}
+            savedScenarios={appState.scenario.savedScenarios}
             onLoadScenario={handleLoadScenario}
           />
         </section>
 
         <section className="panel map-panel">
           <Map
-            source={safeParsePoint(sourceInput)}
-            destination={safeParsePoint(destinationInput)}
-            baselineRoute={baselineRoute}
-            rerouteRoute={rerouteRoute}
-            activeDisruption={activeDisruption}
-            playbackStep={playbackStep}
-            laneLabel={routeLabel}
-            selectionMode={mapSelectionMode}
+            source={safeParsePoint(appState.routeSetup.sourcePoint)}
+            destination={safeParsePoint(appState.routeSetup.destinationPoint)}
+            baselineRoute={appState.routes.baselineRoute}
+            rerouteRoute={appState.routes.rerouteRoute}
+            activeDisruption={appState.routes.activeDisruption}
+            playbackStep={appState.playback.step}
+            laneLabel={laneLabel}
+            selectionMode={appState.routeSetup.mapSelectionMode}
+            selectedLiveDisruptions={appState.routes.selectedLiveDisruptions}
+            estimatedDelayMinutes={estimatedDelayMinutes}
             onMapClick={handleMapClick}
           />
         </section>
 
         <section className="panel right-panel">
-          <MetricsPanel
-            baselineMetrics={baselineMetrics}
-            rerouteMetrics={rerouteMetrics}
-            activeDisruption={activeDisruption}
-            vehicleSpeed={vehicleSpeed}
-            onVehicleSpeedChange={setVehicleSpeed}
-          />
-          <ReasoningCard
-            reasoning={reasoning}
-            onRefresh={handleRefreshReasoning}
-            canRefresh={!!scenarioId}
-            isRefreshing={isRefreshingReasoning}
-          />
-          <ChatBox
-            messages={chatMessages}
-            onSend={handleSendChat}
-            isLoading={isChatLoading}
-            isDisabled={!scenarioId}
-          />
+          <div className="right-split-layout" data-testid="right-split-layout">
+            <div className="right-split-top" data-testid="right-split-top">
+              <MetricsPanel
+                baselineMetrics={appState.routes.baselineMetrics}
+                rerouteMetrics={appState.routes.rerouteMetrics}
+                activeDisruption={appState.routes.activeDisruption}
+                vehicleSpeed={appState.controls.vehicleSpeed}
+                onVehicleSpeedChange={(nextSpeed) => {
+                  setAppState((current) => ({
+                    ...current,
+                    controls: {
+                      ...current.controls,
+                      vehicleSpeed: nextSpeed,
+                    },
+                  }));
+                }}
+              />
+            </div>
+
+            <div className="right-split-bottom" data-testid="right-split-bottom">
+              <ReasoningCard
+                reasoning={appState.reasoning.text}
+                onRefresh={handleRefreshReasoning}
+                canRefresh={!!appState.scenario.id}
+                isRefreshing={appState.loading.reasoning}
+              />
+              <ChatBox
+                messages={appState.reasoning.chatMessages}
+                onSend={handleSendChat}
+                isLoading={appState.loading.chat}
+                isDisabled={!appState.scenario.id}
+              />
+            </div>
+          </div>
         </section>
       </main>
 
-      {errorMessage ? (
+      {appState.ui.errorMessage ? (
         <div className="error-toast" data-testid="error-toast">
           <span className="lucide" data-lucide="alert-circle" style={{ width: 16, height: 16, flexShrink: 0 }} />
-          <span>{errorMessage}</span>
+          <span>{appState.ui.errorMessage}</span>
           <button
             type="button"
             className="btn btn-subtle btn-sm"
-            onClick={() => setErrorMessage("")}
+            onClick={() => {
+              setAppState((current) => ({
+                ...current,
+                ui: {
+                  ...current.ui,
+                  errorMessage: "",
+                },
+              }));
+            }}
             data-testid="error-toast-dismiss-button"
           >
             Dismiss
@@ -421,9 +779,9 @@ export default function App() {
 
       <footer className="playback-footer">
         <PlaybackBar
-          playbackStep={playbackStep}
+          playbackStep={appState.playback.step}
           onStepChange={handleStepChange}
-          isPlaying={isPlaying}
+          isPlaying={appState.playback.isPlaying}
           onTogglePlay={handleTogglePlay}
         />
       </footer>

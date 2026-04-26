@@ -27,6 +27,63 @@ function createDisruptionIcon() {
   });
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatDisruptionType(incident, fallbackType) {
+  const raw = incident?.category || incident?.type || fallbackType || "unknown disruption";
+  return String(raw).replace(/_/g, " ").toLowerCase();
+}
+
+function buildTooltipMarkup({ incident, index, delayMinutes, fallbackType }) {
+  const locationName =
+    incident?.location_name ||
+    incident?.locationName ||
+    incident?.name ||
+    `Route segment ${index + 1}`;
+  const typeLabel = formatDisruptionType(incident, fallbackType);
+  const cause = incident?.description || "Live disruption detected near the route corridor.";
+  const safeDelay = Number.isFinite(delayMinutes) ? Math.max(0, delayMinutes) : 0;
+
+  return `
+    <div class="disruption-tooltip-card" data-testid="disruption-tooltip-card">
+      <div class="tooltip-location">${escapeHtml(locationName)}</div>
+      <div class="tooltip-type">${escapeHtml(typeLabel)}</div>
+      <div class="tooltip-cause">${escapeHtml(cause)}</div>
+      <div class="tooltip-delay">Estimated delay: ${safeDelay} min</div>
+    </div>
+  `;
+}
+
+function findIncidentForLocation(incidents, location, index) {
+  if (!Array.isArray(incidents) || incidents.length === 0) {
+    return null;
+  }
+
+  const indexed = incidents[index];
+  if (
+    indexed?.location &&
+    Math.abs(indexed.location.lat - location.lat) < 0.00001 &&
+    Math.abs(indexed.location.lon - location.lon) < 0.00001
+  ) {
+    return indexed;
+  }
+
+  return (
+    incidents.find((incident) => {
+      const lat = Number(incident?.location?.lat ?? incident?.lat);
+      const lon = Number(incident?.location?.lon ?? incident?.lon);
+      return Math.abs(lat - location.lat) < 0.00001 && Math.abs(lon - location.lon) < 0.00001;
+    }) || indexed || null
+  );
+}
+
 export default function Map({
   source,
   destination,
@@ -36,6 +93,8 @@ export default function Map({
   playbackStep,
   laneLabel,
   selectionMode,
+  selectedLiveDisruptions,
+  estimatedDelayMinutes,
   onMapClick,
 }) {
   const containerRef = useRef(null);
@@ -149,6 +208,7 @@ export default function Map({
         color: "#0A5E63",
         weight: 5,
         opacity: 1,
+        className: "route-line route-line-baseline",
       }).addTo(routes);
       boundsPoints.push(...baselineLine);
     }
@@ -159,6 +219,7 @@ export default function Map({
         weight: 5,
         opacity: rerouteLine.length > 1 ? 0.35 : 1,
         dashArray: rerouteLine.length > 1 ? "10 8" : undefined,
+        className: "route-line route-line-baseline-muted",
       }).addTo(routes);
       boundsPoints.push(...baselineLine);
     }
@@ -168,23 +229,75 @@ export default function Map({
         color: "#E8642C",
         weight: 5,
         opacity: 1,
+        className: "route-line route-line-reroute",
       }).addTo(routes);
       boundsPoints.push(...rerouteLine);
     }
 
-    if (playbackStep >= 1 && activeDisruption?.locations) {
-      activeDisruption.locations.forEach((location, index) => {
-        const disruptionPoint = [location.lat, location.lon];
-        boundsPoints.push(disruptionPoint);
-        L.marker(disruptionPoint, { icon: createDisruptionIcon() }).addTo(alerts);
-      });
-    }
+    const activeLocations = playbackStep >= 1 && activeDisruption?.locations
+      ? activeDisruption.locations.map((location, index) => {
+          const incident = findIncidentForLocation(activeDisruption.incidents, location, index);
+          return { location, incident };
+        })
+      : [];
+
+    const selectedLocations = activeLocations.length === 0
+      ? (selectedLiveDisruptions || [])
+          .map((incident) => {
+            const lat = Number(incident?.location?.lat ?? incident?.lat);
+            const lon = Number(incident?.location?.lon ?? incident?.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+              return null;
+            }
+            return {
+              location: { lat, lon },
+              incident,
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    const disruptionPoints = activeLocations.length > 0 ? activeLocations : selectedLocations;
+    const distributedDelay = disruptionPoints.length > 0
+      ? Math.max(1, Math.round((estimatedDelayMinutes || 0) / disruptionPoints.length))
+      : 0;
+
+    disruptionPoints.forEach((entry, index) => {
+      const disruptionPoint = [entry.location.lat, entry.location.lon];
+      boundsPoints.push(disruptionPoint);
+
+      const marker = L.marker(disruptionPoint, { icon: createDisruptionIcon() }).addTo(alerts);
+      marker.bindTooltip(
+        buildTooltipMarkup({
+          incident: entry.incident,
+          index,
+          delayMinutes: distributedDelay,
+          fallbackType: activeDisruption?.type,
+        }),
+        {
+          direction: "top",
+          offset: [0, -22],
+          sticky: true,
+          opacity: 1,
+          className: "disruption-tooltip-shell",
+        }
+      );
+    });
 
     if (boundsPoints.length > 1) {
       const bounds = L.latLngBounds(boundsPoints);
       mapRef.current.fitBounds(bounds, { padding: [32, 32], maxZoom: 12 });
     }
-  }, [source, destination, baselineRoute, rerouteRoute, activeDisruption, playbackStep]);
+  }, [
+    source,
+    destination,
+    baselineRoute,
+    rerouteRoute,
+    activeDisruption,
+    playbackStep,
+    selectedLiveDisruptions,
+    estimatedDelayMinutes,
+  ]);
 
   const disruptionLabel = activeDisruption?.type
     ? activeDisruption.type === "multiple_disruptions"
@@ -202,7 +315,7 @@ export default function Map({
 
       <div className="floating-banner" data-testid="lane-banner">
         <span>{laneLabel || "Custom lane"}</span>
-        <span className="banner-chip" data-testid="active-disruption-chip">
+        <span className={`banner-chip ${activeDisruption?.type ? "active" : ""}`} data-testid="active-disruption-chip">
           {disruptionLabel}
         </span>
         <div className="banner-hint">{selectionHint}</div>

@@ -40,13 +40,6 @@ function formatDurationDelta(currentS, baselineS) {
   return `${sign}${formatted}`;
 }
 
-function formatCurrency(value) {
-  if (!Number.isFinite(value)) {
-    return "—";
-  }
-  return `$${value.toFixed(0)}`;
-}
-
 function formatDelta(current, baseline, suffix = "") {
   if (!Number.isFinite(current) || !Number.isFinite(baseline)) {
     return null;
@@ -62,12 +55,12 @@ function MetricCard({ title, value, baseline, delta, testId, suffix = "", icon, 
   const deltaClass = delta ? (delta.startsWith("+") ? "negative" : "positive") : "";
 
   return (
-    <div className="metric-card" data-testid={testId}>
+    <div className="metric-card metric-stat-card" data-testid={testId}>
       <div className={`metric-icon ${iconColor}`}>
         <span className="lucide" data-lucide={icon} style={{ width: 16, height: 16 }} />
       </div>
       <div className="metric-title">{title}</div>
-      <div className="metric-value mono">
+      <div className="metric-value mono metric-value-animated">
         {value}{suffix}
       </div>
       {baseline ? <div className="metric-baseline">was {baseline}{suffix}</div> : null}
@@ -83,6 +76,36 @@ function calculateDurationSeconds(distanceM, speedKmh) {
   return (distanceM / 1000 / speedKmh) * 3600;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function SpeedGauge({ speedKmh, min = 20, max = 120 }) {
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const normalized = clamp((speedKmh - min) / (max - min), 0, 1);
+  const strokeLength = normalized * circumference;
+
+  return (
+    <div className="speed-gauge" data-testid="dynamic-speed-gauge">
+      <svg viewBox="0 0 140 140" className="speed-gauge-svg">
+        <circle className="speed-gauge-track" cx="70" cy="70" r={radius} />
+        <circle
+          className="speed-gauge-progress"
+          cx="70"
+          cy="70"
+          r={radius}
+          strokeDasharray={`${strokeLength} ${circumference}`}
+        />
+      </svg>
+      <div className="speed-gauge-center">
+        <div className="speed-gauge-value mono">{speedKmh}</div>
+        <div className="speed-gauge-unit">km/h</div>
+      </div>
+    </div>
+  );
+}
+
 export default function MetricsPanel({
   baselineMetrics,
   rerouteMetrics,
@@ -92,10 +115,16 @@ export default function MetricsPanel({
 }) {
   const currentMetrics = rerouteMetrics || baselineMetrics;
   const hasReroute = Boolean(rerouteMetrics && baselineMetrics);
-  const currentDurationS = calculateDurationSeconds(currentMetrics?.distance_m, vehicleSpeed);
-  const baselineDurationS = hasReroute
-    ? calculateDurationSeconds(baselineMetrics.distance_m, vehicleSpeed)
+  const projectedDurationS = calculateDurationSeconds(currentMetrics?.distance_m, vehicleSpeed);
+  const baselineProjectedDurationS = hasReroute
+    ? calculateDurationSeconds(baselineMetrics?.distance_m, vehicleSpeed)
     : null;
+  const riskDelta = hasReroute
+    ? formatDelta(currentMetrics?.risk_score, baselineMetrics?.risk_score)
+    : null;
+  const disruptionLabel = activeDisruption?.type
+    ? activeDisruption.type.replace(/_/g, " ")
+    : "none";
 
   return (
     <section className="metrics-panel" data-testid="metrics-panel">
@@ -103,42 +132,58 @@ export default function MetricsPanel({
         <div className="section-icon">
           <span className="lucide" data-lucide="bar-chart-3" style={{ width: 16, height: 16 }} />
         </div>
-        <span className="section-title">Metrics</span>
+        <span className="section-title">Route Metrics</span>
+        <span className="metrics-disruption-chip">Disruption: {disruptionLabel}</span>
       </div>
 
-      <MetricCard
-        title="Distance"
-        value={formatDistance(currentMetrics?.distance_m)}
-        baseline={hasReroute ? formatDistance(baselineMetrics.distance_m) : null}
-        delta={
-          hasReroute
-            ? formatDelta(currentMetrics.distance_m / 1000, baselineMetrics.distance_m / 1000, " km")
-            : null
-        }
-        suffix=" km"
-        icon="route"
-        iconColor="teal"
-        testId="metric-distance-card"
-      />
+      <div className="metrics-grid" data-testid="metrics-grid">
+        <MetricCard
+          title="Distance"
+          value={formatDistance(currentMetrics?.distance_m)}
+          baseline={hasReroute ? formatDistance(baselineMetrics.distance_m) : null}
+          delta={
+            hasReroute
+              ? formatDelta(currentMetrics.distance_m / 1000, baselineMetrics.distance_m / 1000, " km")
+              : null
+          }
+          suffix=" km"
+          icon="route"
+          iconColor="teal"
+          testId="metric-distance-card"
+        />
 
-      <MetricCard
-        title="Est. Duration"
-        value={formatDuration(currentDurationS)}
-        baseline={hasReroute ? formatDuration(baselineDurationS) : null}
-        delta={hasReroute ? formatDurationDelta(currentDurationS, baselineDurationS) : null}
-        icon="clock"
-        iconColor="amber"
-        testId="metric-time-card"
-      />
+        <MetricCard
+          title="Duration"
+          value={formatDuration(currentMetrics?.duration_s)}
+          baseline={hasReroute ? formatDuration(baselineMetrics?.duration_s) : null}
+          delta={hasReroute ? formatDurationDelta(currentMetrics?.duration_s, baselineMetrics?.duration_s) : null}
+          icon="clock"
+          iconColor="amber"
+          testId="metric-time-card"
+        />
 
-      <div className="metric-card speed-card full-width" data-testid="metric-speed-card">
-        <div className="section-header" style={{ marginBottom: 0 }}>
-          <div className="section-icon emerald">
-            <span className="lucide" data-lucide="gauge" style={{ width: 16, height: 16 }} />
-          </div>
-          <div>
-            <div className="metric-title">Vehicle Speed</div>
-            <div className="metric-value mono">{vehicleSpeed} <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 500 }}>km/h</span></div>
+        <MetricCard
+          title="Risk Score"
+          value={Number.isFinite(currentMetrics?.risk_score) ? String(currentMetrics.risk_score) : "—"}
+          baseline={hasReroute && Number.isFinite(baselineMetrics?.risk_score) ? String(baselineMetrics.risk_score) : null}
+          delta={riskDelta}
+          suffix="/100"
+          icon="shield-alert"
+          iconColor="rose"
+          testId="metric-risk-card"
+        />
+      </div>
+
+      <div className="metric-card speed-gauge-card" data-testid="metric-speed-card">
+        <div className="speed-gauge-layout">
+          <SpeedGauge speedKmh={vehicleSpeed} />
+          <div className="speed-gauge-copy">
+            <div className="metric-title">Dynamic Speed Gauge</div>
+            <div className="metric-value mono metric-value-animated">{vehicleSpeed} km/h</div>
+            <div className="metric-baseline">
+              Projected ETA: {formatDuration(projectedDurationS)}
+              {hasReroute ? ` (${formatDurationDelta(projectedDurationS, baselineProjectedDurationS) || "n/a"})` : ""}
+            </div>
           </div>
         </div>
         <input
@@ -151,33 +196,6 @@ export default function MetricsPanel({
           className="speed-slider"
           data-testid="speed-slider"
         />
-      </div>
-
-      <div className="metric-card" data-testid="metric-cost-risk-card">
-        <div className="metric-icon rose">
-          <span className="lucide" data-lucide="wallet" style={{ width: 16, height: 16 }} />
-        </div>
-        <div className="metric-title">Cost · Risk Score</div>
-        <div className="metric-value mono">
-          {formatCurrency(currentMetrics?.cost_usd)} <span style={{ color: "var(--text-muted)" }}>·</span> {currentMetrics?.risk_score ?? "—"}<span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>/100</span>
-        </div>
-        {hasReroute ? (
-          <div className="metric-baseline">
-            was {formatCurrency(baselineMetrics.cost_usd)} · {baselineMetrics.risk_score}/100
-          </div>
-        ) : null}
-      </div>
-
-      <div className="metric-card" data-testid="metric-active-disruption-card">
-        <div className={`metric-icon ${activeDisruption?.type ? "rose" : "emerald"}`}>
-          <span className="lucide" data-lucide={activeDisruption?.type ? "alert-triangle" : "shield-check"} style={{ width: 16, height: 16 }} />
-        </div>
-        <div className="metric-title">Active Disruption</div>
-        <div className="metric-value" style={{ color: activeDisruption?.type ? "var(--rose)" : "var(--emerald)" }}>
-          {activeDisruption?.type
-            ? activeDisruption.type.replace(/_/g, " ")
-            : "None"}
-        </div>
       </div>
     </section>
   );
