@@ -8,6 +8,7 @@ import ScenarioForm from "./components/ScenarioForm.jsx";
 import {
   computeOptimizedRoute,
   computeAlternateRoute,
+  fetchReasoning,
   fetchScenario,
   fetchScenarios,
   sendScenarioChat,
@@ -23,6 +24,10 @@ function parsePoint(point) {
 
   if (Number.isNaN(lat) || Number.isNaN(lon)) {
     throw new Error("Coordinates must be valid numbers");
+  }
+
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    throw new Error("Coordinates are out of range (lat: -90 to 90, lon: -180 to 180)");
   }
 
   return { lat, lon };
@@ -67,6 +72,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [isComputing, setIsComputing] = useState(false);
   const [isComputingAlternate, setIsComputingAlternate] = useState(false);
+  const [isRefreshingReasoning, setIsRefreshingReasoning] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -268,6 +274,23 @@ export default function App() {
     }
   }
 
+  async function handleRefreshReasoning() {
+    if (!scenarioId || isRefreshingReasoning) {
+      return;
+    }
+
+    try {
+      setErrorMessage("");
+      setIsRefreshingReasoning(true);
+      const payload = await fetchReasoning(scenarioId);
+      setReasoning(payload.reasoning || "Reasoning refreshed.");
+    } catch (error) {
+      setErrorMessage(error.message || "Failed to refresh reasoning");
+    } finally {
+      setIsRefreshingReasoning(false);
+    }
+  }
+
   async function handleSendChat(message) {
     if (!scenarioId) {
       setErrorMessage("Compute a route before using chat");
@@ -366,7 +389,12 @@ export default function App() {
             vehicleSpeed={vehicleSpeed}
             onVehicleSpeedChange={setVehicleSpeed}
           />
-          <ReasoningCard reasoning={reasoning} />
+          <ReasoningCard
+            reasoning={reasoning}
+            onRefresh={handleRefreshReasoning}
+            canRefresh={!!scenarioId}
+            isRefreshing={isRefreshingReasoning}
+          />
           <ChatBox
             messages={chatMessages}
             onSend={handleSendChat}

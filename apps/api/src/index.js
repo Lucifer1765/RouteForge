@@ -1,4 +1,4 @@
-import "dotenv/config";
+import { createRequire } from "module";
 import cors from "cors";
 import express from "express";
 import chatRouter from "./routes/chat.js";
@@ -7,6 +7,15 @@ import routesRouter from "./routes/routes.js";
 import scenariosRouter from "./routes/scenarios.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { storageMode } from "./services/firestore.js";
+
+const require = createRequire(import.meta.url);
+
+try {
+  // Optional in tests or minimal installs where dotenv may be absent.
+  require("dotenv/config");
+} catch (_error) {
+  // Ignore missing dotenv and continue with existing process.env.
+}
 
 function parseOrigins() {
   const raw = process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:5174,http://localhost:5175";

@@ -8,6 +8,7 @@ vi.mock("../src/components/Map.jsx", () => ({
 vi.mock("../src/lib/api.js", () => ({
   computeOptimizedRoute: vi.fn(),
   computeAlternateRoute: vi.fn(),
+  fetchReasoning: vi.fn(),
   fetchScenario: vi.fn(),
   fetchScenarios: vi.fn(),
   sendScenarioChat: vi.fn(),
@@ -17,6 +18,7 @@ import App from "../src/App.jsx";
 import {
   computeOptimizedRoute,
   computeAlternateRoute,
+  fetchReasoning,
   fetchScenarios,
   sendScenarioChat,
 } from "../src/lib/api.js";
@@ -84,6 +86,7 @@ describe("App", () => {
     fetchScenarios.mockResolvedValue({ scenarios: [] });
     computeOptimizedRoute.mockResolvedValue(baselineResponse);
     computeAlternateRoute.mockResolvedValue(disruptionResponse);
+    fetchReasoning.mockResolvedValue({ reasoning: "Refreshed route reasoning" });
     sendScenarioChat.mockResolvedValue({ reply: "Dispatch with caution." });
   });
 
@@ -113,6 +116,37 @@ describe("App", () => {
     });
 
     expect(screen.getByTestId("metric-distance-card")).toHaveTextContent("120.0 km");
+  });
+
+  test("shows validation error when coordinates are missing", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-toast")).toHaveTextContent("Coordinates must be valid numbers");
+    });
+
+    expect(computeOptimizedRoute).not.toHaveBeenCalled();
+  });
+
+  test("shows validation error when coordinates are out of range", async () => {
+    render(<App />);
+
+    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "134.0522" } });
+    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
+    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
+    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
+
+    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error-toast")).toHaveTextContent(
+        "Coordinates are out of range (lat: -90 to 90, lon: -180 to 180)"
+      );
+    });
+
+    expect(computeOptimizedRoute).not.toHaveBeenCalled();
   });
 
   test("alternate route updates active disruption card", async () => {
@@ -156,6 +190,25 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(sendScenarioChat).toHaveBeenCalledWith("scenario-1", "What is the risk?");
+    });
+  });
+
+  test("refresh reasoning fetches latest explanation", async () => {
+    render(<App />);
+
+    fireEvent.input(screen.getByTestId("source-lat-input"), { target: { value: "34.0522" } });
+    fireEvent.input(screen.getByTestId("source-lon-input"), { target: { value: "-118.2437" } });
+    fireEvent.input(screen.getByTestId("destination-lat-input"), { target: { value: "41.8781" } });
+    fireEvent.input(screen.getByTestId("destination-lon-input"), { target: { value: "-87.6298" } });
+
+    fireEvent.click(screen.getByTestId("compute-optimized-route-button"));
+    await waitFor(() => expect(computeOptimizedRoute).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId("refresh-reasoning-button"));
+
+    await waitFor(() => {
+      expect(fetchReasoning).toHaveBeenCalledWith("scenario-1");
+      expect(screen.getByTestId("reasoning-card")).toHaveTextContent("Refreshed route reasoning");
     });
   });
 
