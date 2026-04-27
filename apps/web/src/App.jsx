@@ -170,6 +170,44 @@ function clearRoutingForDraft(current, nextRouteSetup) {
 }
 
 export default function App() {
+  const splashText = "RouteForge";
+  const [showSplash, setShowSplash] = useState(true);
+  const [typed, setTyped] = useState("");
+  const [showTour, setShowTour] = useState(true);
+  const [tourStep, setTourStep] = useState(0);
+
+  const tourSteps = [
+    {
+      title: "Welcome to RouteForge",
+      body: "Select a source and destination on the map, then compute an optimized route.",
+    },
+    {
+      title: "Live Disruptions",
+      body: "Enable alternate routing by selecting live disruptions and computing alternate routes.",
+    },
+    {
+      title: "AI Insights & Chat",
+      body: "Use the AI summary and scenario chat to ask questions about delays and routing.",
+    },
+  ];
+
+  useEffect(() => {
+    let idx = 0;
+    const typingSpeed = 90; // ms per char
+    const interval = setInterval(() => {
+      setTyped((t) => t + splashText[idx]);
+      idx += 1;
+      if (idx >= splashText.length) {
+        clearInterval(interval);
+        // keep splash visible shortly after typing completes (extended by +1s)
+        const hold = setTimeout(() => setShowSplash(false), 1700);
+        // cleanup if unmounted
+        return () => clearTimeout(hold);
+      }
+    }, typingSpeed);
+
+    return () => clearInterval(interval);
+  }, []);
   const [appState, setAppState] = useState({
     routeSetup: {
       sourcePoint: null,
@@ -744,6 +782,44 @@ export default function App() {
 
   return (
     <div className="app-shell" data-testid="app-shell">
+      {showSplash ? (
+        <div className="splash-overlay" aria-hidden>
+          <div className="splash-content">
+            <div className="splash-brand">{typed}</div>
+            <div className="splash-sub">by DarthVaders</div>
+          </div>
+        </div>
+      ) : null}
+      {showTour && !showSplash ? (
+        <div className="tour-overlay" role="dialog" aria-modal="true">
+          <div className="tour-card">
+            <div className="tour-title">{tourSteps[tourStep].title}</div>
+            <div className="tour-body">{tourSteps[tourStep].body}</div>
+            <div className="tour-actions">
+              <button
+                type="button"
+                className="tour-btn tour-btn-ghost"
+                onClick={() => setShowTour(false)}
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                className="tour-btn tour-btn-primary"
+                onClick={() => {
+                  if (tourStep >= tourSteps.length - 1) {
+                    setShowTour(false);
+                  } else {
+                    setTourStep((s) => s + 1);
+                  }
+                }}
+              >
+                {tourStep >= tourSteps.length - 1 ? "Finish" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <header className="topbar" data-testid="topbar">
         <div className="topbar-left">
           <span className={`status-dot ${appState.scenario.id ? "" : "offline"}`} />

@@ -13,6 +13,22 @@ export default function ReasoningCard({ reasoning, onRefresh, canRefresh, isRefr
 
   return (
     <section className="reasoning-card" data-testid="reasoning-card">
+      {visible ? (
+        <div
+          ref={panelRef}
+          className={`floating-flash ${closing ? 'closing' : ''}`}
+          role="dialog"
+          aria-live="polite"
+          style={pos.left != null && pos.top != null ? { left: pos.left + 'px', top: pos.top + 'px', transform: 'none', width: size.width ? size.width + 'px' : undefined, height: size.height ? size.height + 'px' : undefined } : undefined}
+        >
+          <div className="floating-flash-header" onPointerDown={onHeaderPointerDown}>
+            <div className="floating-flash-title">AI Summary</div>
+            <button aria-label="Close summary" className="floating-flash-close" onClick={closeWindow}>×</button>
+          </div>
+          <div className="floating-flash-body">{msg}</div>
+        </div>
+      ) : null}
+
       <div className="section-header">
         <div className="section-icon amber">
           <span className="lucide" data-lucide="lightbulb" style={{ width: 16, height: 16 }} />

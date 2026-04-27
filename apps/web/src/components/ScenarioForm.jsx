@@ -58,6 +58,16 @@ export default function ScenarioForm({
   const [isDisruptionMenuOpen, setIsDisruptionMenuOpen] = useState(false);
   const disruptionMenuRef = useRef(null);
 
+  // Maximized panel state
+  const [isMaximized, setIsMaximized] = useState(false);
+  const panelRef = useRef(null);
+  const [panelPos, setPanelPos] = useState({ left: null, top: null });
+  const [panelSize, setPanelSize] = useState({ width: null, height: null });
+  const [severityFilter, setSeverityFilter] = useState("all");
+
+  const [overlayMessage, setOverlayMessage] = useState("");
+  const [messageAnim, setMessageAnim] = useState("anim-wipe");
+
   useEffect(() => {
     if (!isDisruptionMenuOpen) {
       return undefined;
@@ -75,14 +85,177 @@ export default function ScenarioForm({
     };
   }, [isDisruptionMenuOpen]);
 
+  useEffect(() => {
+    // Show overlay messages when any spinner is active (computing or alternate computing)
+    const active = Boolean(isComputing || isComputingAlternate);
+    if (!active) {
+      setOverlayMessage("");
+      return undefined;
+    }
+
+    const messages = [
+      "Cooking best route",
+      "Warming up AI engine",
+      "Escaping flaws on route",
+      "Optimizing traffic flow",
+      "Testing alternate lanes",
+      "Hunting the fastest path",
+    ];
+    const anims = ["anim-wipe", "anim-bouncy", "anim-smooth"];
+
+    let idx = Math.floor(Math.random() * messages.length);
+    setOverlayMessage(messages[idx]);
+    setMessageAnim(anims[Math.floor(Math.random() * anims.length)]);
+
+    const interval = setInterval(() => {
+      idx = Math.floor(Math.random() * messages.length);
+      setOverlayMessage(messages[idx]);
+      setMessageAnim(anims[Math.floor(Math.random() * anims.length)]);
+    }, 1800);
+
+    return () => clearInterval(interval);
+  }, [isComputing, isComputingAlternate]);
+
+  // drag handling for maximized panel
+  function onPanelHeaderPointerDown(e) {
+    if (!panelRef.current) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const rect = panelRef.current.getBoundingClientRect();
+    const offsetX = startX - rect.left;
+    const offsetY = startY - rect.top;
+
+    function onMove(ev) {
+      const nx = ev.clientX - offsetX;
+      const ny = ev.clientY - offsetY;
+      const w = panelRef.current.offsetWidth;
+      const h = panelRef.current.offsetHeight;
+      const clampedX = Math.max(8, Math.min(nx, window.innerWidth - w - 8));
+      const clampedY = Math.max(8, Math.min(ny, window.innerHeight - h - 8));
+      setPanelPos({ left: clampedX, top: clampedY });
+    }
+
+    function onUp() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+
+  // update panel size after any user resize
+  useEffect(() => {
+    function onPointerUp() {
+      if (!panelRef.current) return;
+      const r = panelRef.current.getBoundingClientRect();
+      setPanelSize({ width: Math.round(r.width), height: Math.round(r.height) });
+    }
+    document.addEventListener('pointerup', onPointerUp);
+    return () => document.removeEventListener('pointerup', onPointerUp);
+  }, []);
+
   const sourceSelected = Boolean(routeSetup.sourcePoint);
   const destinationSelected = Boolean(routeSetup.destinationPoint);
   const routeName = `${routeSetup.sourceName.trim() || "Source"} → ${routeSetup.destinationName.trim() || "Destination"}`;
   const disruptionOptions = liveDisruptions.map(buildDisruptionItem);
   const selectedCount = selectedLiveDisruptions?.length || 0;
 
+  // grouped by severity
+  const grouped = disruptionOptions.reduce((acc, it) => {
+    const sev = (it.severity || "high").toString().toLowerCase();
+    if (!acc[sev]) acc[sev] = [];
+    acc[sev].push(it);
+    return acc;
+  }, { low: [], medium: [], high: [] });
+
   return (
-    <div className="scenario-form">
+    <>
+      {(isComputing || isComputingAlternate) ? (
+        <div className="fullscreen-spinner-overlay" aria-hidden="true">
+          <div className={`message ${messageAnim}`}>{overlayMessage}</div>
+        </div>
+      ) : null}
+
+      {isMaximized ? (
+        <div
+          ref={panelRef}
+          className="scenario-maximized-panel"
+          style={panelPos.left != null && panelPos.top != null ? { left: panelPos.left + 'px', top: panelPos.top + 'px', transform: 'none', width: panelSize.width ? panelSize.width + 'px' : undefined, height: panelSize.height ? panelSize.height + 'px' : undefined } : undefined}
+        >
+          <div className="scenario-panel-header" onPointerDown={onPanelHeaderPointerDown}>
+            <div className="scenario-panel-title">Route setup — Disruptions</div>
+            <div className="scenario-panel-actions">
+              <button className="btn btn-subtle" onClick={() => setIsMaximized(false)} aria-label="Minimize">×</button>
+            </div>
+          </div>
+
+          <div className="scenario-panel-body">
+            <div className="coord-grid">
+              <label className="field-label">Source name</label>
+              <input className="input" value={routeSetup.sourceName} onInput={(e) => onLocationNameChange("source", e.currentTarget.value)} />
+              <label className="field-label">Destination name</label>
+              <input className="input" value={routeSetup.destinationName} onInput={(e) => onLocationNameChange("destination", e.currentTarget.value)} />
+            </div>
+
+            <div className="severity-toggle">
+              <button type="button" className={`btn ${severityFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSeverityFilter('all')}>All</button>
+              <button type="button" className={`btn ${severityFilter === 'low' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSeverityFilter('low')}>Low</button>
+              <button type="button" className={`btn ${severityFilter === 'medium' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSeverityFilter('medium')}>Medium</button>
+              <button type="button" className={`btn ${severityFilter === 'high' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSeverityFilter('high')}>High</button>
+            </div>
+
+            <div className="disruption-groups">
+              {['low','medium','high'].map((level) => (
+                (severityFilter === 'all' || severityFilter === level) ? (
+                  <div key={level} className="disruption-group">
+                    <div className="disruption-group-title">{level.charAt(0).toUpperCase() + level.slice(1)}</div>
+                    <div className="disruption-list">
+                      {(grouped[level] || []).length === 0 ? (
+                        <div className="field-note">No {level} disruptions</div>
+                      ) : (
+                        (grouped[level] || []).map((incident) => {
+                          const isSelected = Boolean(
+                            selectedLiveDisruptions && selectedLiveDisruptions.some((item) => item.id === incident.id)
+                          );
+                          return (
+                            <button key={incident.id} type="button" className={`disruption-option ${isSelected ? 'selected' : ''}`} onClick={() => onSelectLiveDisruption(incident)}>
+                              <div className="disruption-title-row">
+                                <span className="disruption-title">{formatDisruptionTitle(incident)}</span>
+                                <span className={`disruption-severity ${getSeverityBadgeClass(incident.severity)}`}>{incident.severity || 'High'}</span>
+                              </div>
+                              <div className="disruption-description">{incident.description}</div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                ) : null
+              ))}
+            </div>
+
+            <div className="scenario-panel-footer">
+              <button
+                  type="button"
+                  className="btn btn-amber compute-alternate"
+                  onClick={() => {
+                    // close UI immediately, run compute in background
+                    setIsMaximized(false);
+                    Promise.resolve(onComputeAlternateRoute()).catch(() => {});
+                  }}
+                  disabled={!canComputeAlternate || isComputingAlternate || !selectedLiveDisruptions || selectedLiveDisruptions.length === 0}
+                >
+                {isComputingAlternate ? (<><span className="spinner" />Computing alternate route</>) : (`Compute alternate route (${selectedLiveDisruptions ? selectedLiveDisruptions.length : 0} disruption${selectedLiveDisruptions && selectedLiveDisruptions.length !== 1 ? 's' : ''})`)}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!isMaximized ? (
+        <div className="scenario-form">
       <div className="section-title-row">
         <span className="dot" />
         <span className="section-title">Route setup</span>
@@ -163,6 +336,9 @@ export default function ScenarioForm({
       <div className="section-title-row">
         <span className="dot" />
         <span className="section-title">Disruptions</span>
+        <div style={{ marginLeft: 'auto' }}>
+          <button type="button" className="btn btn-ghost" onClick={() => setIsMaximized(true)} aria-label="Maximize">Maximize</button>
+        </div>
       </div>
 
       {disruptionOptions.length > 0 ? (
@@ -248,8 +424,12 @@ export default function ScenarioForm({
 
       <button
         type="button"
-        className="btn btn-amber"
-        onClick={onComputeAlternateRoute}
+        className="btn btn-amber compute-alternate"
+        onClick={() => {
+          // close UI immediately, run compute in background
+          setIsMaximized(false);
+          Promise.resolve(onComputeAlternateRoute()).catch(() => {});
+        }}
         disabled={!canComputeAlternate || isComputingAlternate || !selectedLiveDisruptions || selectedLiveDisruptions.length === 0}
         data-testid="compute-alternate-route-button"
       >
@@ -285,6 +465,8 @@ export default function ScenarioForm({
           ))
         )}
       </div>
-    </div>
+        </div>
+      ) : null}
+    </>
   );
 }
