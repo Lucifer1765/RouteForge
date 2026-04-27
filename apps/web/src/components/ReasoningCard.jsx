@@ -1,4 +1,16 @@
+import { useEffect, useState } from "preact/hooks";
+
 export default function ReasoningCard({ reasoning, onRefresh, canRefresh, isRefreshing }) {
+  const summary =
+    reasoning ||
+    "Compute a route and select disruptions to generate a scenario-aware operational summary.";
+  const isLongSummary = summary.length > 140;
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [summary]);
+
   return (
     <section className="reasoning-card" data-testid="reasoning-card">
       <div className="section-header">
@@ -16,9 +28,19 @@ export default function ReasoningCard({ reasoning, onRefresh, canRefresh, isRefr
           {isRefreshing ? "Refreshing..." : "Refresh reasoning"}
         </button>
       </div>
-      <p className="reasoning-copy">
-        {reasoning || "Compute a route and select disruptions to generate a scenario-aware operational summary."}
+      <p className={`reasoning-copy ${isExpanded ? "expanded" : "collapsed"}`}>
+        {summary}
       </p>
+      {isLongSummary ? (
+        <button
+          type="button"
+          className="reasoning-expand-button"
+          onClick={() => setIsExpanded((current) => !current)}
+          data-testid="reasoning-expand-button"
+        >
+          {isExpanded ? "Show less" : "...click to view more"}
+        </button>
+      ) : null}
     </section>
   );
 }
